@@ -1,0 +1,6 @@
+SELECT
+    MAX(ef.timestamp_utc) AS LastDeadlockUTC,
+    MAX(ef.timestamp_utc AT TIME ZONE 'UTC' AT TIME ZONE 'India Standard Time') AS LastDeadlockIST
+FROM sys.fn_xe_file_target_read_file
+     ('system_health*.xel', NULL, NULL, NULL) ef
+WHERE ef.object_name = 'xml_deadlock_report';
