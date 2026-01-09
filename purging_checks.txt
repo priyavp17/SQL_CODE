@@ -1,0 +1,121 @@
+/* ============================================
+   PRE-PURGE VALIDATION SCRIPT – SINGLE PROMPT
+   ============================================ */
+
+SET NOCOUNT ON;
+
+DECLARE @TableName SYSNAME = 'dbo.YourTableName';
+
+/* 1. COLUMN DETAILS */
+SELECT 
+    'COLUMN_DETAILS' AS Section,
+    c.name AS ColumnName,
+    t.name AS DataType,
+    c.max_length,
+    c.is_nullable,
+    c.is_identity
+FROM sys.columns c
+JOIN sys.types t ON c.user_type_id = t.user_type_id
+WHERE c.object_id = OBJECT_ID(@TableName)
+ORDER BY c.column_id;
+
+
+/* 2. PRIMARY KEY & UNIQUE CONSTRAINTS */
+SELECT 
+    'KEY_CONSTRAINTS' AS Section,
+    kc.name AS ConstraintName,
+    kc.type_desc,
+    c.name AS ColumnName
+FROM sys.key_constraints kc
+JOIN sys.index_columns ic 
+    ON kc.parent_object_id = ic.object_id
+    AND kc.unique_index_id = ic.index_id
+JOIN sys.columns c 
+    ON ic.object_id = c.object_id
+    AND ic.column_id = c.column_id
+WHERE kc.parent_object_id = OBJECT_ID(@TableName);
+
+
+/* 3. FOREIGN KEY DEPENDENCIES */
+SELECT 
+    'FOREIGN_KEYS' AS Section,
+    fk.name AS FK_Name,
+    OBJECT_NAME(fk.parent_object_id) AS ChildTable,
+    c1.name AS ChildColumn,
+    OBJECT_NAME(fk.referenced_object_id) AS ParentTable,
+    c2.name AS ParentColumn
+FROM sys.foreign_keys fk
+JOIN sys.foreign_key_columns fkc 
+    ON fk.object_id = fkc.constraint_object_id
+JOIN sys.columns c1 
+    ON fkc.parent_object_id = c1.object_id 
+    AND fkc.parent_column_id = c1.column_id
+JOIN sys.columns c2 
+    ON fkc.referenced_object_id = c2.object_id 
+    AND fkc.referenced_column_id = c2.column_id
+WHERE fk.parent_object_id = OBJECT_ID(@TableName)
+   OR fk.referenced_object_id = OBJECT_ID(@TableName);
+
+
+/* 4. CHECK CONSTRAINTS */
+SELECT 
+    'CHECK_CONSTRAINTS' AS Section,
+    cc.name AS ConstraintName,
+    cc.definition
+FROM sys.check_constraints cc
+WHERE cc.parent_object_id = OBJECT_ID(@TableName);
+
+
+/* 5. INDEX DETAILS */
+SELECT 
+    'INDEXES' AS Section,
+    i.name AS IndexName,
+    i.type_desc,
+    i.is_unique,
+    c.name AS ColumnName
+FROM sys.indexes i
+JOIN sys.index_columns ic 
+    ON i.object_id = ic.object_id 
+    AND i.index_id = ic.index_id
+JOIN sys.columns c 
+    ON ic.object_id = c.object_id 
+    AND ic.column_id = c.column_id
+WHERE i.object_id = OBJECT_ID(@TableName)
+ORDER BY i.name;
+
+
+/* 6. TRIGGERS */
+SELECT 
+    'TRIGGERS' AS Section,
+    name AS TriggerName,
+    is_disabled
+FROM sys.triggers
+WHERE parent_id = OBJECT_ID(@TableName);
+
+
+/* 7. DEPENDENT OBJECTS (Views / Procs / Functions) */
+SELECT 
+    'DEPENDENCIES' AS Section,
+    OBJECT_NAME(referencing_id) AS ObjectName,
+    o.type_desc
+FROM sys.sql_expression_dependencies d
+JOIN sys.objects o 
+    ON d.referencing_id = o.object_id
+WHERE d.referenced_id = OBJECT_ID(@TableName);
+
+
+/* 8. ROW COUNT */
+SELECT 
+    'ROW_COUNT' AS Section,
+    SUM(p.rows) AS TotalRows
+FROM sys.partitions p
+WHERE p.object_id = OBJECT_ID(@TableName)
+  AND p.index_id IN (0,1);
+
+
+/* 9. SAMPLE PURGE CHECK (EDIT CONDITION) */
+SELECT 
+    'PURGE_CANDIDATE' AS Section,
+    COUNT(*) AS RowsEligibleForDelete
+FROM dbo.YourTableName
+WHERE CreatedDate < DATEADD(MONTH, -6, GETDATE()); -- MODIFY
