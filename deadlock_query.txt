@@ -1,0 +1,36 @@
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    TRUNCATE TABLE dbadb.dbo.DL_REPORT_XML_DATA;
+
+    INSERT INTO dbadb.dbo.DL_REPORT_XML_DATA
+    (
+        EVENTTIME,
+        XMLREPORT
+    )
+    SELECT
+        ef.timestamp_utc
+            AT TIME ZONE 'UTC'
+            AT TIME ZONE 'India Standard Time' AS Event_time_IST,
+        CAST(ef.event_data AS XML)
+            .query('/event/data/value/deadlock') AS Deadlock_XML
+    FROM sys.fn_xe_file_target_read_file
+         ('system_health*.xel', NULL, NULL, NULL) ef
+    WHERE ef.object_name = 'xml_deadlock_report'
+      AND ef.timestamp_utc >=
+          (
+              CAST(
+                  CONVERT(date, SYSDATETIMEOFFSET() AT TIME ZONE 'India Standard Time')
+                  AS datetime2
+              ) + '07:00:00'
+          ) AT TIME ZONE 'India Standard Time' AT TIME ZONE 'UTC'
+      AND ef.timestamp_utc <
+          (
+              CAST(
+                  CONVERT(date, SYSDATETIMEOFFSET() AT TIME ZONE 'India Standard Time')
+                  AS datetime2
+              ) + '20:00:00'
+          ) AT TIME ZONE 'India Standard Time' AT TIME ZONE 'UTC';
+END
+GO
