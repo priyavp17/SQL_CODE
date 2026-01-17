@@ -50,3 +50,24 @@ SELECT
     wait_time_ms
 FROM sys.dm_os_wait_stats
 WHERE wait_type LIKE 'BACKUP%';
+
+
+SELECT
+    bs.database_name,
+    CASE bs.type
+        WHEN 'D' THEN 'FULL'
+        WHEN 'I' THEN 'DIFF'
+        WHEN 'L' THEN 'LOG'
+    END AS BackupType,
+    bs.backup_start_date,
+    bs.backup_finish_date,
+    CAST(bs.backup_size / 1024.0 / 1024.0 AS DECIMAL(12,2)) AS BackupSize_MB_BeforeCompression,
+    CAST(bs.compressed_backup_size / 1024.0 / 1024.0 AS DECIMAL(12,2)) AS BackupSize_MB_AfterCompression,
+    CAST(
+        (1 - (bs.compressed_backup_size * 1.0 / NULLIF(bs.backup_size,0))) * 100
+        AS DECIMAL(5,2)
+    ) AS Compression_Saving_Percentage
+FROM msdb.dbo.backupset bs
+WHERE bs.backup_start_date >= DATEADD(DAY, -7, GETDATE())
+ORDER BY bs.backup_start_date DESC;
+
