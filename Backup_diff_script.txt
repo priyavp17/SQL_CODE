@@ -1,0 +1,52 @@
+/* 1. Differential backup duration & size */
+SELECT
+    database_name,
+    backup_start_date,
+    backup_finish_date,
+    DATEDIFF(SECOND, backup_start_date, backup_finish_date) AS Diff_Duration_Seconds,
+    CAST(backup_size / 1024.0 / 1024.0 AS DECIMAL(10,2)) AS DiffSize_MB,
+    CAST(compressed_backup_size / 1024.0 / 1024.0 AS DECIMAL(10,2)) AS CompressedSize_MB,
+    is_compressed
+FROM msdb.dbo.backupset
+WHERE type = 'I'
+ORDER BY backup_start_date DESC;
+
+
+/* 2. Last successful FULL backup */
+SELECT
+    database_name,
+    MAX(backup_finish_date) AS LastFullBackupTime
+FROM msdb.dbo.backupset
+WHERE type = 'D'
+GROUP BY database_name;
+
+
+/* 3. Data file size / growth */
+SELECT
+    DB_NAME(database_id) AS database_name,
+    name,
+    physical_name,
+    size * 8 / 1024 AS DataFileSize_MB
+FROM sys.master_files
+WHERE type = 0
+ORDER BY database_name;
+
+
+/* 4. Check if backup is waiting on I/O (when running) */
+SELECT
+    session_id,
+    command,
+    wait_type,
+    wait_time,
+    percent_complete
+FROM sys.dm_exec_requests
+WHERE command LIKE 'BACKUP%';
+
+
+/* 5. Backup-related wait statistics */
+SELECT
+    wait_type,
+    waiting_tasks_count,
+    wait_time_ms
+FROM sys.dm_os_wait_stats
+WHERE wait_type LIKE 'BACKUP%';
