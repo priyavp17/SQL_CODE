@@ -97,4 +97,21 @@ FROM msdb.dbo.backupset bs
 WHERE bs.backup_start_date >= DATEADD(DAY, -7, GETDATE())
 ORDER BY bs.backup_start_date DESC;
 
+SELECT
+    vs.volume_mount_point AS Drive,
+    vs.logical_volume_name AS VolumeName,
+    CAST(vs.total_bytes / 1024.0 / 1024 / 1024 AS DECIMAL(10,2)) AS TotalSize_GB,
+    CAST(vs.available_bytes / 1024.0 / 1024 / 1024 AS DECIMAL(10,2)) AS FreeSpace_GB,
+    CAST((vs.total_bytes - vs.available_bytes) / 1024.0 / 1024 / 1024 AS DECIMAL(10,2)) AS UsedSpace_GB,
+    CAST((vs.available_bytes * 100.0 / vs.total_bytes) AS DECIMAL(5,2)) AS FreeSpace_Pct,
+    CAST(((vs.total_bytes - vs.available_bytes) * 100.0 / vs.total_bytes) AS DECIMAL(5,2)) AS UsedSpace_Pct
+FROM sys.master_files mf
+CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) vs
+GROUP BY
+    vs.volume_mount_point,
+    vs.logical_volume_name,
+    vs.total_bytes,
+    vs.available_bytes
+ORDER BY Drive;
+
 
