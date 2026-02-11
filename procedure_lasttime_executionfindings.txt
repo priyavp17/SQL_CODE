@@ -1,0 +1,22 @@
+SELECT  
+    OBJECT_NAME(q.object_id) AS StoredProcedureName,
+    MAX(rs.last_execution_time) AS LastExecutionTime
+FROM sys.query_store_query q
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+WHERE q.object_id IS NOT NULL
+AND OBJECTPROPERTY(q.object_id, 'IsProcedure') = 1
+GROUP BY q.object_id
+ORDER BY LastExecutionTime DESC;
+
+----------------------------------------------------
+
+
+SELECT  
+    OBJECT_NAME(object_id) AS StoredProcedureName,
+    last_execution_time
+FROM sys.dm_exec_procedure_stats
+WHERE database_id = DB_ID()
+ORDER BY last_execution_time DESC;
