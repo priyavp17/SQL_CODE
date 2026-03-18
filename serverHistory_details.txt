@@ -1,0 +1,17 @@
+USE [DBADB]
+GO
+
+/****** Object:  Table [geomon].[ServerRestartHistory]    Script Date: 3/18/2026 12:43:06 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [geomon].[ServerRestartHistory](
+	[server_name] [varchar](100) NULL,
+	[host_name] [varchar](100) NULL,
+	[restart_time] [datetime] NULL
+) ON [PRIMARY]
+GO
+
