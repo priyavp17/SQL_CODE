@@ -1,0 +1,191 @@
+/* 🔹 Script 1: Top Queries (Last 24 Hours) */
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    SUM(rs.count_executions) AS exec_count,
+    SUM(rs.avg_duration * rs.count_executions) / 1000 AS total_duration_ms,
+    MAX(rs.max_duration) / 1000 AS max_duration_ms
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+JOIN sys.query_store_runtime_stats_interval rsi 
+    ON rs.runtime_stats_interval_id = rsi.runtime_stats_interval_id
+WHERE rsi.start_time >= DATEADD(HOUR, -24, GETDATE())
+GROUP BY q.query_id, qt.query_sql_text
+ORDER BY total_duration_ms DESC;
+
+
+
+/* 🔹 Script 2: Queries for Specific Stored Procedure */
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    rs.avg_duration / 1000 AS avg_duration_ms,
+    rs.max_duration / 1000 AS max_duration_ms,
+    rs.count_executions,
+    p.plan_id
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+WHERE qt.query_sql_text LIKE '%FSTRN_LIMIT_VALIDATION_REVAMP%'
+ORDER BY rs.avg_duration DESC;
+
+
+
+/* 🔹 Script 3: Multiple Plans for a Query */
+SELECT 
+    p.query_id,
+    p.plan_id,
+    p.is_forced_plan,
+    rs.avg_duration,
+    rs.max_duration,
+    rs.count_executions
+FROM sys.query_store_plan p
+JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+WHERE p.query_id = <QUERY_ID>
+ORDER BY rs.avg_duration DESC;
+
+
+
+/* 🔹 Script 4: Get Execution Plans */
+SELECT 
+    p.plan_id,
+    p.query_plan
+FROM sys.query_store_plan p
+WHERE p.query_id = <QUERY_ID>;
+
+
+
+/* 🔹 Script 5: Force a Good Plan */
+EXEC sp_query_store_force_plan 
+    @query_id = <QUERY_ID>, 
+    @plan_id = <PLAN_ID>;
+
+
+
+/* 🔹 Script 6: Active Blocking Sessions */
+SELECT 
+    r.session_id,
+    r.blocking_session_id,
+    r.wait_type,
+    r.wait_time,
+    r.wait_resource,
+    r.status,
+    t.text AS query_text
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.blocking_session_id <> 0;
+
+
+
+/* 🔹 Script 7: Head Blocker */
+SELECT 
+    session_id,
+    blocking_session_id,
+    wait_type,
+    wait_time,
+    status
+FROM sys.dm_exec_requests
+WHERE blocking_session_id = 0
+AND session_id IN (
+    SELECT blocking_session_id 
+    FROM sys.dm_exec_requests 
+    WHERE blocking_session_id <> 0
+);
+
+
+
+/* 🔹 Script 8: Long Running Transactions */
+SELECT 
+    at.transaction_id,
+    at.transaction_begin_time,
+    DATEDIFF(MINUTE, at.transaction_begin_time, GETDATE()) AS duration_min,
+    s.session_id
+FROM sys.dm_tran_active_transactions at
+JOIN sys.dm_tran_session_transactions st 
+    ON at.transaction_id = st.transaction_id
+JOIN sys.dm_exec_sessions s 
+    ON st.session_id = s.session_id
+ORDER BY duration_min DESC;
+
+
+
+/* 🔹 Script 9: Open Transaction */
+DBCC OPENTRAN;
+
+
+
+/* 🔹 Script 10: Current Locks */
+SELECT 
+    request_session_id,
+    resource_type,
+    resource_database_id,
+    resource_associated_entity_id,
+    request_mode
+FROM sys.dm_tran_locks
+ORDER BY request_session_id;
+
+
+
+/* 🔹 Script 11: Missing Index Suggestions */
+SELECT 
+    migs.avg_total_user_cost,
+    migs.avg_user_impact,
+    mid.statement AS table_name,
+    mid.equality_columns,
+    mid.inequality_columns,
+    mid.included_columns
+FROM sys.dm_db_missing_index_group_stats migs
+JOIN sys.dm_db_missing_index_groups mig 
+    ON migs.group_handle = mig.index_group_handle
+JOIN sys.dm_db_missing_index_details mid 
+    ON mig.index_handle = mid.index_handle
+ORDER BY migs.avg_user_impact DESC;
+
+
+
+/* 🔹 Script 12: Check Isolation Level */
+SELECT 
+    session_id,
+    transaction_isolation_level
+FROM sys.dm_exec_sessions
+WHERE session_id = <SPID>;
+
+
+
+
+
+
+
+/* 🔹 Script 14: High Execution Count Queries */
+SELECT 
+    qt.query_sql_text,
+    SUM(rs.count_executions) AS total_executions
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+GROUP BY qt.query_sql_text
+ORDER BY total_executions DESC;
+
+
+
+/* 🔹 Script 15: Query Wait Stats */
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    rs.avg_query_wait_time_ms,
+    rs.last_query_wait_time_ms
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+ORDER BY rs.avg_query_wait_time_ms DESC;
