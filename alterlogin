@@ -1,0 +1,9 @@
+SELECT 
+    pr.name AS LoginName,
+    pe.permission_name,
+    pe.state_desc
+FROM sys.server_permissions pe
+JOIN sys.server_principals pr 
+    ON pe.grantee_principal_id = pr.principal_id
+WHERE pr.name = 'YourLoginName'
+ORDER BY pe.permission_name;
