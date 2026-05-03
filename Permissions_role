@@ -1,0 +1,44 @@
+🔹 1. Server-Level Permissions
+SELECT 
+    sp.name AS LoginName,
+    sp.type_desc,
+    sp.is_disabled,
+    perm.permission_name,
+    perm.state_desc
+FROM sys.server_principals sp
+LEFT JOIN sys.server_permissions perm 
+    ON sp.principal_id = perm.grantee_principal_id
+WHERE sp.name = 'YourLoginName';
+
+🔹 2. Server Role Membership
+SELECT 
+    sp.name AS LoginName,
+    sr.name AS ServerRole
+FROM sys.server_role_members srm
+JOIN sys.server_principals sp 
+    ON srm.member_principal_id = sp.principal_id
+JOIN sys.server_principals sr 
+    ON srm.role_principal_id = sr.principal_id
+WHERE sp.name = 'YourLoginName';
+🔹 3. Database-Level Permissions (Run in EACH DB)
+SELECT 
+    DB_NAME() AS DatabaseName,
+    dp.name AS UserName,
+    dp.type_desc,
+    perm.permission_name,
+    perm.state_desc
+FROM sys.database_principals dp
+LEFT JOIN sys.database_permissions perm 
+    ON dp.principal_id = perm.grantee_principal_id
+WHERE dp.sid = SUSER_SID('YourLoginName');
+🔹 4. Database Role Membership (Run in EACH DB)
+SELECT 
+    DB_NAME() AS DatabaseName,
+    dp.name AS UserName,
+    drp.name AS DatabaseRole
+FROM sys.database_role_members drm
+JOIN sys.database_principals dp 
+    ON drm.member_principal_id = dp.principal_id
+JOIN sys.database_principals drp 
+    ON drm.role_principal_id = drp.principal_id
+WHERE dp.sid = SUSER_SID('YourLoginName');
