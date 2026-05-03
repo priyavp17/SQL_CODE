@@ -1,0 +1,36 @@
+USE master;
+GO
+
+-- Check server level role memberships
+SELECT 
+    r.name AS RoleName,
+    m.name AS MemberName
+FROM sys.server_role_members rm
+JOIN sys.server_principals r ON rm.role_principal_id = r.principal_id
+JOIN sys.server_principals m ON rm.member_principal_id = m.principal_id
+WHERE m.name = 'atawsdba';
+GO
+
+-- Check database level permissions
+USE Tredsproddb;
+GO
+SELECT 
+    dp.name AS UserName,
+    o.name AS ObjectName,
+    p.permission_name,
+    p.state_desc
+FROM sys.database_permissions p
+JOIN sys.database_principals dp ON p.grantee_principal_id = dp.principal_id
+LEFT JOIN sys.objects o ON p.major_id = o.object_id
+WHERE dp.name = 'atawsdba';
+GO
+
+-- Check database role memberships
+SELECT 
+    r.name AS RoleName,
+    m.name AS MemberName
+FROM sys.database_role_members rm
+JOIN sys.database_principals r ON rm.role_principal_id = r.principal_id
+JOIN sys.database_principals m ON rm.member_principal_id = m.principal_id
+WHERE m.name = 'atawsdba';
+GO
