@@ -1,0 +1,42 @@
+DECLARE @LoginName SYSNAME = 'YourLoginName';
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL + '
+USE [' + name + '];
+
+-- Permissions
+SELECT 
+    ''' + name + ''' AS DatabaseName,
+    dp.name AS UserName,
+    dp.type_desc,
+    perm.permission_name,
+    perm.state_desc,
+    NULL AS RoleName
+FROM sys.database_principals dp
+LEFT JOIN sys.database_permissions perm 
+    ON dp.principal_id = perm.grantee_principal_id
+WHERE dp.sid = SUSER_SID(''' + @LoginName + ''')
+
+UNION ALL
+
+-- Roles
+SELECT 
+    ''' + name + ''' AS DatabaseName,
+    dp.name AS UserName,
+    dp.type_desc,
+    NULL AS permission_name,
+    NULL AS state_desc,
+    drp.name AS RoleName
+FROM sys.database_role_members drm
+JOIN sys.database_principals dp 
+    ON drm.member_principal_id = dp.principal_id
+JOIN sys.database_principals drp 
+    ON drm.role_principal_id = drp.principal_id
+WHERE dp.sid = SUSER_SID(''' + @LoginName + ''');
+
+'
+FROM sys.databases
+WHERE state_desc = 'ONLINE'
+  AND database_id > 4; -- skips system DBs (optional)
+
+EXEC sp_executesql @SQL;
