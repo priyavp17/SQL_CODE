@@ -89,3 +89,13 @@ JOIN sys.database_principals dp
 JOIN sys.database_principals rp
     ON drm.role_principal_id = rp.principal_id
 ORDER BY dp.name, rp.name;
+
+SELECT
+    sp.name AS LoginName,
+    dp.name AS DatabaseUser,
+    dp.type_desc
+FROM sys.server_principals sp
+JOIN sys.database_principals dp
+    ON sp.sid = dp.sid
+WHERE sp.name IN ('atredsdba','atawsdba')
+ORDER BY sp.name;
