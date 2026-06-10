@@ -1,0 +1,160 @@
+CREATE OR ALTER PROCEDURE dbo.usp_SQLServiceStatusReport
+    @ClientName          NVARCHAR(100),
+    @MailProfile         NVARCHAR(100),
+    @Recipients          NVARCHAR(500),
+    @BlindCopyRecipients NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    /*------------------------------------------------------------------
+      1.  Collect service info from DMV
+    ------------------------------------------------------------------*/
+    DECLARE @ServerName      NVARCHAR(128) = CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(128));
+    DECLARE @ReportGenerated NVARCHAR(30)  = FORMAT(GETDATE(), 'dd MMM yyyy HH:mm:ss');
+    DECLARE @Subject         NVARCHAR(256);
+    DECLARE @HtmlBody        NVARCHAR(MAX);
+    DECLARE @TableRows       NVARCHAR(MAX) = N'';
+
+    -- Subject now uses ClientName instead of ServerName
+    --SET @Subject = N'SQL Service Status Report - ' + @ClientName;
+    --SET @Subject = N'SQL Service Status Report - ' 
+    --         + @ClientName 
+    --         + N' - ' 
+    --         + FORMAT(GETDATE(), 'dd MMM yyyy');
+    SET @Subject = @ClientName 
+             + N' - SQL Service Status Report - ' 
+             + CONVERT(VARCHAR(10), GETDATE(), 23);
+
+    CREATE TABLE #ServiceStatus
+    (
+        ServiceName     NVARCHAR(256),
+        [Status]        NVARCHAR(50),
+        LastRestartTime NVARCHAR(50)
+    );
+
+    INSERT INTO #ServiceStatus (ServiceName, [Status], LastRestartTime)
+    SELECT
+        servicename,
+        CASE status_desc
+            WHEN 'Running' THEN 'RUNNING'
+            ELSE UPPER(status_desc)
+        END,
+        /*
+         *  last_startup_time is NULL for SQL Server Agent when it has
+         *  never been restarted independently — fall back to the SQL
+         *  Server service start time so the cell is never blank.
+         */
+        ISNULL(
+            FORMAT(last_startup_time, 'dd MMM yyyy HH:mm:ss:fff'),
+            ISNULL(
+                -- Secondary fallback: sqlserver.exe process start time
+                FORMAT(
+                    (
+                        SELECT TOP 1 login_time
+                        FROM sys.dm_exec_sessions
+                        WHERE login_name = 'sa' OR session_id = 1
+                        ORDER BY session_id ASC
+                    ),
+                    'dd MMM yyyy HH:mm:ss:fff'
+                ),
+                -- Final fallback: SQL Server start time from sys.databases
+                FORMAT(
+                    (
+                        SELECT create_date
+                        FROM sys.databases
+                        WHERE name = 'tempdb'
+                    ),
+                    'dd MMM yyyy HH:mm:ss:fff'
+                )
+            )
+        )
+    FROM sys.dm_server_services
+    WHERE servicename LIKE 'SQL Server%'
+      AND servicename NOT LIKE '%Browser%';
+
+    /*------------------------------------------------------------------
+      2.  Build HTML table rows
+    ------------------------------------------------------------------*/
+    SELECT @TableRows = @TableRows +
+        N'<tr>' +
+        N'<td style="padding:14px 18px;font-size:14px;color:#333333;border-bottom:1px solid #e8e8e8;">'
+            + ServiceName + N'</td>' +
+        N'<td style="padding:14px 18px;text-align:center;border-bottom:1px solid #e8e8e8;">' +
+            CASE [Status]
+                WHEN 'RUNNING'
+                THEN N'<span style="display:inline-block;padding:5px 16px;border-radius:20px;border:1.5px solid #28a745;color:#28a745;font-size:13px;font-weight:600;">&#9679;&nbsp;RUNNING</span>'
+                ELSE N'<span style="display:inline-block;padding:5px 16px;border-radius:20px;border:1.5px solid #dc3545;color:#dc3545;font-size:13px;font-weight:600;">&#9679;&nbsp;' + [Status] + N'</span>'
+            END +
+        N'</td>' +
+        N'<td style="padding:14px 18px;font-size:14px;color:#333333;border-bottom:1px solid #e8e8e8;">'
+            + LastRestartTime + N'</td>' +
+        N'</tr>'
+    FROM #ServiceStatus;
+
+    /*------------------------------------------------------------------
+      3.  Assemble full HTML body
+    ------------------------------------------------------------------*/
+    SET @HtmlBody =
+        N'<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:Arial,sans-serif;margin:0;padding:20px;background:#f4f6fb;">' +
+        N'<div style="max-width:700px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">' +
+
+        -- Header
+        N'<div style="background:#2d4eaa;padding:32px 24px 24px;text-align:center;">' +
+        N'<div style="color:#a0b4e8;font-size:12px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">Automated Monitoring</div>' +
+        N'<div style="color:#ffffff;font-size:26px;font-weight:700;letter-spacing:1px;margin:0 0 10px;">SQL SERVICE STATUS REPORT</div>' +
+        N'<div style="width:40px;height:3px;background:#5b8dee;margin:0 auto;border-radius:2px;"></div>' +
+        N'</div>' +
+
+        -- Meta row
+        N'<div style="border-bottom:1px solid #e8e8e8;">' +
+        N'<table style="width:100%;border-collapse:collapse;"><tr>' +
+        N'<td style="padding:18px 22px;border-right:1px solid #e8e8e8;width:33%;">' +
+        N'<div style="font-size:11px;color:#888888;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">Client Name</div>' +
+        N'<div style="font-size:16px;font-weight:700;color:#2d4eaa;">' + @ClientName + N'</div></td>' +
+        N'<td style="padding:18px 22px;border-right:1px solid #e8e8e8;width:33%;">' +
+        N'<div style="font-size:11px;color:#888888;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">Server Name</div>' +
+        N'<div style="font-size:16px;font-weight:700;color:#2d4eaa;">' + @ServerName + N'</div></td>' +
+        N'<td style="padding:18px 22px;width:34%;">' +
+        N'<div style="font-size:11px;color:#888888;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">Report Generated</div>' +
+        N'<div style="font-size:16px;font-weight:700;color:#2d4eaa;">' + @ReportGenerated + N'</div></td>' +
+        N'</tr></table></div>' +
+
+        -- Service table
+        N'<div style="padding:24px 22px 28px;">' +
+        N'<div style="font-size:12px;color:#888888;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;">Service Overview</div>' +
+        N'<table style="width:100%;border-collapse:collapse;">' +
+        N'<thead><tr style="background:#2d4eaa;">' +
+        N'<th style="color:#ffffff;font-size:13px;font-weight:600;padding:12px 18px;text-align:left;">Service Name</th>' +
+        N'<th style="color:#ffffff;font-size:13px;font-weight:600;padding:12px 18px;text-align:center;">Status</th>' +
+        N'<th style="color:#ffffff;font-size:13px;font-weight:600;padding:12px 18px;text-align:left;">Last Restart Time</th>' +
+        N'</tr></thead>' +
+        N'<tbody>' + @TableRows + N'</tbody></table></div>' +
+
+        -- Footer
+        N'<div style="padding:16px 22px;font-size:11px;color:#aaaaaa;text-align:center;">This is an automated report generated by the SQL Monitoring System.</div>' +
+        N'</div></body></html>';
+
+    /*------------------------------------------------------------------
+      4.  Send email
+    ------------------------------------------------------------------*/
+    EXEC msdb.dbo.sp_send_dbmail
+        @profile_name          = @MailProfile,
+        @recipients            = @Recipients,
+        @blind_copy_recipients = @BlindCopyRecipients,
+        @subject               = @Subject,
+        @body                  = @HtmlBody,
+        @body_format           = 'HTML';
+
+    DROP TABLE #ServiceStatus;
+
+END;
+GO
+
+
+EXEC dbo.usp_SQLServiceStatusReport
+    @ClientName          = 'Vishnu',
+    @MailProfile         = 'YourMailProfile',
+    @Recipients          = 'client@company.com',
+    @CopyRecipients      = 'dccagent@geopits.com',
+    @BlindCopyRecipients = 'mssqltechsupport@geopits.com';
