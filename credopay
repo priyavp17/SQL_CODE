@@ -1,117 +1,29 @@
-Kindly use the below queries to fetch the historical execution statistics and query cost details for the mentioned stored procedures.
-These queries will only read performance metadata from DMVs/Query Store and will NOT execute the stored procedures again.
+USE YourDatabaseName;
+GO
 
----
-
-1. Stored Procedure Execution Statistics
-
----
-
-SELECT
-DB_NAME(database_id) AS DatabaseName,
-OBJECT_NAME(object_id, database_id) AS ProcedureName,
-cached_time,
-last_execution_time,
-execution_count,
-total_elapsed_time / 1000 AS TotalElapsedTime_ms,
-(total_elapsed_time / execution_count) / 1000 AS AvgElapsedTime_ms,
-total_worker_time / 1000 AS TotalCPU_ms,
-(total_worker_time / execution_count) / 1000 AS AvgCPU_ms,
-total_logical_reads,
-total_logical_writes
-FROM sys.dm_exec_procedure_stats
-WHERE OBJECT_NAME(object_id, database_id) IN
-(
-'DPR_INS_MATM_VOUCHING_DATA',
-'DPR_USERGENERATE_CSV_REPORT',
-'DPR_GENERATE_CSV_REPORT',
-'DPR_MATM_PAYMENT_PROCESSING'
-)
-ORDER BY last_execution_time DESC;
-
----
-
-2. Query Store Runtime Statistics (Historical Details)
-
----
-
-SELECT
-OBJECT_NAME(qsq.object_id) AS ProcedureName,
-qsp.plan_id,
-qsrs.count_executions,
-qsrs.avg_duration / 1000 AS AvgDuration_ms,
-qsrs.max_duration / 1000 AS MaxDuration_ms,
-qsrs.avg_cpu_time / 1000 AS AvgCPU_ms,
-qsrs.avg_logical_io_reads AS AvgLogicalReads,
-qsrs.avg_query_max_used_memory AS AvgMemoryUsageKB
+SELECT 
+    OBJECT_NAME(qsq.object_id) AS ProcedureName,
+    rs.count_executions,
+    rs.avg_duration / 1000 AS AvgDuration_ms,
+    rs.avg_cpu_time / 1000 AS AvgCPU_ms,
+    rs.avg_logical_io_reads,
+    rs.last_execution_time
 FROM sys.query_store_query qsq
-JOIN sys.query_store_plan qsp
-ON qsq.query_id = qsp.query_id
-JOIN sys.query_store_runtime_stats qsrs
-ON qsp.plan_id = qsrs.plan_id
-WHERE OBJECT_NAME(qsq.object_id) IN
-(
-'DPR_INS_MATM_VOUCHING_DATA',
-'DPR_USERGENERATE_CSV_REPORT',
-'DPR_GENERATE_CSV_REPORT',
-'DPR_MATM_PAYMENT_PROCESSING'
-)
-ORDER BY qsrs.max_duration DESC;
+INNER JOIN sys.query_store_plan qsp
+    ON qsq.query_id = qsp.query_id
+INNER JOIN sys.query_store_runtime_stats rs
+    ON qsp.plan_id = rs.plan_id
+WHERE OBJECT_NAME(qsq.object_id) = 'DPR_GENERATE_CSV_REPORT'
+ORDER BY rs.last_execution_time DESC;
 
----
+USE YourDatabaseName;
+GO
 
-3. Get Estimated Query Cost from Cached Execution Plans
-
----
-
-SELECT
-DB_NAME(st.dbid) AS DatabaseName,
-OBJECT_NAME(st.objectid, st.dbid) AS ProcedureName,
-qs.execution_count,
-qs.total_elapsed_time / 1000 AS TotalElapsed_ms,
-qs.total_worker_time / 1000 AS TotalCPU_ms,
-qp.query_plan
-FROM sys.dm_exec_query_stats qs
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
-WHERE OBJECT_NAME(st.objectid, st.dbid) IN
-(
-'DPR_INS_MATM_VOUCHING_DATA',
-'DPR_USERGENERATE_CSV_REPORT',
-'DPR_GENERATE_CSV_REPORT',
-'DPR_MATM_PAYMENT_PROCESSING'
-);
-
-Note:
-
-* Open the XML execution plan from the "query_plan" column.
-* Check the "Estimated Subtree Cost" value from the execution plan.
-* This represents the optimizer estimated query cost.
-
----
-
-4. Long Running Queries from Last Week
-
----
-
-SELECT TOP 20
-OBJECT_NAME(st.objectid, st.dbid) AS ProcedureName,
-qs.execution_count,
-qs.total_elapsed_time / 1000 AS TotalElapsed_ms,
-(qs.total_elapsed_time / qs.execution_count) / 1000 AS AvgElapsed_ms,
-qs.total_worker_time / 1000 AS TotalCPU_ms,
-qs.total_logical_reads,
-qs.last_execution_time
-FROM sys.dm_exec_query_stats qs
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-WHERE OBJECT_NAME(st.objectid, st.dbid) IN
-(
-'DPR_INS_MATM_VOUCHING_DATA',
-'DPR_USERGENERATE_CSV_REPORT',
-'DPR_GENERATE_CSV_REPORT',
-'DPR_MATM_PAYMENT_PROCESSING'
-)
-AND qs.last_execution_time >= DATEADD(DAY, -7, GETDATE())
-ORDER BY AvgElapsed_ms DESC;
-
-These queries can be safely executed on the client server to collect historical performance statistics and query cost details without rerunning the stored procedures.
+SELECT 
+    qsq.query_id,
+    OBJECT_NAME(qsq.object_id) AS ProcedureName,
+    qsqt.query_sql_text
+FROM sys.query_store_query qsq
+INNER JOIN sys.query_store_query_text qsqt
+    ON qsq.query_text_id = qsqt.query_text_id
+WHERE OBJECT_NAME(qsq.object_id) = 'DPR_GENERATE_CSV_REPORT';
