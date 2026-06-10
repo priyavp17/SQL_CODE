@@ -16,3 +16,33 @@ INNER JOIN sys.query_store_runtime_stats rs
 WHERE OBJECT_NAME(qsq.object_id) = 'DPR_GENERATE_CSV_REPORT'
 AND CAST(rs.last_execution_time AS DATE) = '2026-06-07'
 ORDER BY rs.last_execution_time DESC;
+
+
+USE YourDatabaseName;
+GO
+
+SELECT 
+    qsq.query_id,
+    OBJECT_NAME(qsq.object_id) AS ProcedureName,
+    qsp.plan_id,
+    rs.last_execution_time
+FROM sys.query_store_query qsq
+INNER JOIN sys.query_store_plan qsp
+    ON qsq.query_id = qsp.query_id
+INNER JOIN sys.query_store_runtime_stats rs
+    ON qsp.plan_id = rs.plan_id
+WHERE OBJECT_NAME(qsq.object_id) = 'DPR_GENERATE_CSV_REPORT'
+ORDER BY rs.last_execution_time DESC;
+
+
+USE YourDatabaseName;
+GO
+
+SELECT 
+    qsq.query_id,
+    qsp.plan_id,
+    TRY_CAST(qsp.query_plan AS XML) AS QueryPlan
+FROM sys.query_store_query qsq
+INNER JOIN sys.query_store_plan qsp
+    ON qsq.query_id = qsp.query_id
+WHERE qsq.query_id = YOUR_QUERY_ID;
