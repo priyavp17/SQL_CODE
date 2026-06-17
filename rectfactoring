@@ -40,6 +40,15 @@ WHERE
     qt.query_sql_text LIKE '%RCT_FACTORING_UNIT_BATCH%'
 ORDER BY rs.avg_logical_io_reads DESC;
 
+SELECT
+    q.query_id,
+    LEN(qt.query_sql_text) AS QueryLength,
+    CAST(qt.query_sql_text AS NVARCHAR(MAX)) AS FullQueryText
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt
+    ON q.query_text_id = qt.query_text_id
+WHERE qt.query_sql_text LIKE '%RCT_FACTORING_UNIT_BATCH%';
+
 -- B. Extract the engine's own "missing index" recommendation from the plan XML
 -- This is the strongest proof — SQL Server itself flags it, with an impact %
 SELECT 
