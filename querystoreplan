@@ -22,6 +22,16 @@ WHERE
     AND qt.query_sql_text LIKE '%IS_REFERAL_FEE%'
 ORDER BY q.last_execution_time DESC;
 
+SELECT
+    q.query_id,
+    p.plan_id,
+    p.last_execution_time,
+    CAST(p.query_plan AS XML) AS QueryPlan
+FROM sys.query_store_plan p
+JOIN sys.query_store_query q
+    ON p.query_id = q.query_id
+WHERE q.query_id = <QueryID>;
+
 -- Step 1: Find victim query (SELECT COUNT) in Query Store
 SELECT 
     q.query_id,
