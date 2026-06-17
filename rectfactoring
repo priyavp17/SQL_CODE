@@ -1,3 +1,22 @@
+DECLARE @DeadlockTime DATETIME = '2026-06-15 13:12:24';
+
+SELECT
+    q.query_id,
+    p.plan_id,
+    rs.last_execution_time,
+    qt.query_sql_text,
+    CAST(p.query_plan AS XML) AS QueryPlan
+FROM sys.query_store_query_text qt
+JOIN sys.query_store_query q
+    ON qt.query_text_id = q.query_text_id
+JOIN sys.query_store_plan p
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs
+    ON p.plan_id = rs.plan_id
+WHERE rs.last_execution_time BETWEEN
+      DATEADD(MINUTE,-5,@DeadlockTime)
+  AND DATEADD(MINUTE,5,@DeadlockTime);
+
 -- A. Pull execution plans for all statements touching RCT_FACTORING_UNIT_BATCH
 SELECT 
     q.query_id,
