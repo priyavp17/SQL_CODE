@@ -1,0 +1,103 @@
+-- A. Pull execution plans for all statements touching RCT_FACTORING_UNIT_BATCH
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    rs.avg_duration / 1000.0        AS avg_duration_ms,
+    rs.avg_logical_io_reads         AS avg_logical_reads,
+    rs.avg_rowcount                 AS avg_rowcount,
+    rs.count_executions             AS count_executions,
+    rs.last_execution_time          AS last_execution_time,
+    p.plan_id,
+    p.last_compile_time,
+    TRY_CAST(p.query_plan AS XML)   AS execution_plan_xml
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+WHERE 
+    qt.query_sql_text LIKE '%RCT_FACTORING_UNIT_BATCH%'
+ORDER BY rs.avg_logical_io_reads DESC;
+
+-- B. Extract the engine's own "missing index" recommendation from the plan XML
+-- This is the strongest proof — SQL Server itself flags it, with an impact %
+SELECT 
+    q.query_id,
+    p.plan_id,
+    LEFT(qt.query_sql_text, 200)    AS query_snippet,
+    mi.value('(@Impact)', 'float')  AS impact_pct,
+    mi.value('(MissingIndexGroup/MissingIndex/@Database)[1]','sysname') AS missing_db,
+    mi.value('(MissingIndexGroup/MissingIndex/@Schema)[1]','sysname')   AS missing_schema,
+    mi.value('(MissingIndexGroup/MissingIndex/@Table)[1]','sysname')    AS missing_table,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="EQUALITY"]/Column/@Name)[1]','sysname') AS eq_col1,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="EQUALITY"]/Column/@Name)[2]','sysname') AS eq_col2,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="EQUALITY"]/Column/@Name)[3]','sysname') AS eq_col3,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="INEQUALITY"]/Column/@Name)[1]','sysname') AS ineq_col1,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="INCLUDE"]/Column/@Name)[1]','sysname')  AS include_col1,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="INCLUDE"]/Column/@Name)[2]','sysname')  AS include_col2
+FROM sys.query_store_plan p
+JOIN sys.query_store_query q 
+    ON p.query_id = q.query_id
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+CROSS APPLY TRY_CAST(p.query_plan AS XML).nodes('//MissingIndexes/MissingIndexGroup') AS t(mi)
+WHERE 
+    qt.query_sql_text LIKE '%RCT_FACTORING_UNIT_BATCH%'
+    OR qt.query_sql_text LIKE '%FCT_PART_CHARGE_CALC_DETAILS%'
+ORDER BY impact_pct DESC;
+
+-- C. Find the exact operator (Scan vs Seek) and estimated rows — for screenshots
+-- Run this, then click execution_plan_xml to open the graphical plan in SSMS
+SELECT 
+    q.query_id,
+    p.plan_id,
+    LEFT(qt.query_sql_text, 150)            AS query_snippet,
+    n.value('(@PhysicalOp)[1]', 'varchar(50)')   AS physical_operator,
+    n.value('(@LogicalOp)[1]', 'varchar(50)')    AS logical_operator,
+    n.value('(@EstimateRows)[1]', 'float')       AS estimated_rows,
+    n.value('(@EstimateIO)[1]', 'float')         AS estimated_io,
+    n.value('(@EstimateCPU)[1]', 'float')        AS estimated_cpu,
+    n.value('(.//Object/@Table)[1]', 'sysname')  AS table_scanned,
+    n.value('(.//Object/@Index)[1]', 'sysname')  AS index_used,
+    TRY_CAST(p.query_plan AS XML)            AS execution_plan_xml
+FROM sys.query_store_plan p
+JOIN sys.query_store_query q 
+    ON p.query_id = q.query_id
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+CROSS APPLY TRY_CAST(p.query_plan AS XML).nodes('//RelOp') AS t(n)
+WHERE 
+    (qt.query_sql_text LIKE '%RCT_FACTORING_UNIT_BATCH%'
+     OR qt.query_sql_text LIKE '%FCT_PART_CHARGE_CALC_DETAILS%')
+    AND n.value('(@PhysicalOp)[1]', 'varchar(50)') IN ('Table Scan','Clustered Index Scan','Index Scan')
+ORDER BY estimated_rows DESC;
+
+-- D. Tie high logical reads directly to the deadlock time windows
+-- proves the scan was happening at the exact moment deadlocks fired
+SELECT 
+    q.query_id,
+    LEFT(qt.query_sql_text, 150)    AS query_snippet,
+    si.start_time                   AS interval_start,
+    si.end_time                     AS interval_end,
+    rs.count_executions,
+    rs.avg_logical_io_reads,
+    rs.max_logical_io_reads,
+    rs.avg_duration / 1000.0        AS avg_duration_ms,
+    p.plan_id,
+    TRY_CAST(p.query_plan AS XML)   AS execution_plan_xml
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+JOIN sys.query_store_runtime_stats_interval si 
+    ON rs.runtime_stats_interval_id = si.runtime_stats_interval_id
+WHERE 
+    qt.query_sql_text LIKE '%RCT_FACTORING_UNIT_BATCH%'
+    AND si.start_time >= '2026-06-15 11:00'
+    AND si.end_time   <= '2026-06-15 19:00'
+ORDER BY rs.avg_logical_io_reads DESC;
