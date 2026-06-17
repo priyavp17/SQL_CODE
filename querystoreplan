@@ -22,6 +22,30 @@ WHERE
     AND qt.query_sql_text LIKE '%IS_REFERAL_FEE%'
 ORDER BY q.last_execution_time DESC;
 
+-- Step 1: Find victim query (SELECT COUNT) in Query Store
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    rs.avg_duration / 1000.0        AS avg_duration_ms,
+    rs.avg_logical_io_reads         AS avg_logical_reads,
+    rs.avg_rowcount                 AS avg_rowcount,
+    rs.count_executions             AS count_executions,
+    rs.last_execution_time          AS last_execution_time,
+    p.plan_id,
+    p.last_compile_time,
+    TRY_CAST(p.query_plan AS XML)   AS execution_plan_xml
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+WHERE 
+    qt.query_sql_text LIKE '%FCT_PART_CHARGE_CALC_DETAILS%'
+    AND qt.query_sql_text LIKE '%IS_REFERAL_FEE%'
+ORDER BY rs.last_execution_time DESC;
+
 -- Find the stored procedure execution plan
 SELECT 
     q.query_id,
