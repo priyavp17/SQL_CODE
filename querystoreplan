@@ -1,0 +1,101 @@
+-- Find Query IDs for both victim and waiter queries
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    q.last_execution_time,
+    q.count_executions,
+    rs.avg_duration / 1000.0        AS avg_duration_ms,
+    rs.avg_logical_io_reads         AS avg_logical_reads,
+    rs.avg_rowcount                 AS avg_rowcount,
+    p.plan_id,
+    p.last_compile_time,
+    TRY_CAST(p.query_plan AS XML)   AS execution_plan_xml
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+WHERE 
+    qt.query_sql_text LIKE '%FCT_PART_CHARGE_CALC_DETAILS%'
+    AND qt.query_sql_text LIKE '%IS_REFERAL_FEE%'
+ORDER BY q.last_execution_time DESC;
+
+-- Find the stored procedure execution plan
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    q.last_execution_time,
+    q.count_executions,
+    rs.avg_duration / 1000.0        AS avg_duration_ms,
+    rs.avg_logical_io_reads         AS avg_logical_reads,
+    rs.min_duration / 1000.0        AS min_duration_ms,
+    rs.max_duration / 1000.0        AS max_duration_ms,
+    rs.avg_cpu_time / 1000.0        AS avg_cpu_ms,
+    p.plan_id,
+    p.last_compile_time,
+    TRY_CAST(p.query_plan AS XML)   AS execution_plan_xml
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+WHERE 
+    qt.query_sql_text LIKE '%ISIP_RCT_V2_IBP_BULK_BID_DETAILS_UPD%'
+    OR qt.query_sql_text LIKE '%EBID_FACTORING_UNIT%'
+ORDER BY q.last_execution_time DESC;
+
+
+-- Narrow to the exact deadlock window (13:12 to 18:44 on 15-Jun-2026)
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    rs.runtime_stats_interval_id,
+    si.start_time                   AS interval_start,
+    si.end_time                     AS interval_end,
+    rs.count_executions,
+    rs.avg_duration / 1000.0        AS avg_duration_ms,
+    rs.avg_logical_io_reads         AS avg_logical_reads,
+    rs.avg_degree_of_parallelism,
+    p.plan_id,
+    TRY_CAST(p.query_plan AS XML)   AS execution_plan_xml
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p 
+    ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs 
+    ON p.plan_id = rs.plan_id
+JOIN sys.query_store_runtime_stats_interval si 
+    ON rs.runtime_stats_interval_id = si.runtime_stats_interval_id
+WHERE 
+    qt.query_sql_text LIKE '%FCT_PART_CHARGE_CALC_DETAILS%'
+    AND si.start_time >= '2026-06-15 13:00'
+    AND si.end_time   <= '2026-06-15 19:00'
+ORDER BY si.start_time DESC;
+
+
+-- Extract missing index hints embedded in the execution plan XML
+SELECT 
+    q.query_id,
+    p.plan_id,
+    qt.query_sql_text,
+    mi.value('(@Impact)', 'float')                              AS impact_pct,
+    mi.value('(MissingIndexGroup/MissingIndex/@Database)[1]','sysname') AS missing_db,
+    mi.value('(MissingIndexGroup/MissingIndex/@Schema)[1]','sysname')   AS missing_schema,
+    mi.value('(MissingIndexGroup/MissingIndex/@Table)[1]','sysname')    AS missing_table,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="EQUALITY"]/Column/@Name)[1]','sysname') AS eq_col1,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="EQUALITY"]/Column/@Name)[2]','sysname') AS eq_col2,
+    mi.value('(MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="INCLUDE"]/Column/@Name)[1]','sysname')  AS include_col1
+FROM sys.query_store_plan p
+JOIN sys.query_store_query q 
+    ON p.query_id = q.query_id
+JOIN sys.query_store_query_text qt 
+    ON q.query_text_id = qt.query_text_id
+CROSS APPLY TRY_CAST(p.query_plan AS XML).nodes('//MissingIndexes/MissingIndexGroup') AS t(mi)
+WHERE 
+    qt.query_sql_text LIKE '%FCT_PART_CHARGE_CALC_DETAILS%'
+ORDER BY impact_pct DESC;
