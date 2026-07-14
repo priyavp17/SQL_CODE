@@ -1,0 +1,14 @@
+SELECT 
+    bs.database_name,
+    bs.backup_start_date,
+    bs.backup_finish_date,
+    bs.type AS backup_type,           -- 'L' = Log backup
+    bmf.physical_device_name AS backup_location,
+    bmf.device_type,
+    bs.backup_size / 1024 / 1024 AS backup_size_MB
+FROM msdb.dbo.backupset bs
+INNER JOIN msdb.dbo.backupmediafamily bmf
+    ON bs.media_set_id = bmf.media_set_id
+WHERE bs.type = 'L'                    -- Log backups only
+    AND bs.database_name = 'MARSPROD'  -- change/remove to check all DBs
+ORDER BY bs.backup_start_date DESC;
