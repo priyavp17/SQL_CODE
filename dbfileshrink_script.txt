@@ -1,0 +1,133 @@
+USE [DBADB]
+GO
+
+/****** Object:  StoredProcedure [dbo].[usp_ShrinkFile_WithLogging]    Script Date: 26-07-2026 15:20:30 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+CREATE   PROCEDURE [dbo].[usp_ShrinkFile_WithLogging]
+(
+    @DatabaseName SYSNAME,
+    @FileName SYSNAME,
+    @ShrinkIncrementMB INT = 4096,
+    @FreePercent INT = 20
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @SQL NVARCHAR(MAX)
+
+    SET @SQL = '
+    USE ' + QUOTENAME(@DatabaseName) + ';
+
+    DECLARE
+        @SizeMB INT,
+        @UsedMB INT,
+        @TargetFreeMB INT,
+        @TargetSizeMB INT,
+        @BeforeSizeMB INT
+
+    SELECT @SizeMB = size/128
+    FROM sys.database_files
+    WHERE name = ''' + @FileName + '''
+
+    IF @SizeMB IS NULL
+    BEGIN
+        RAISERROR(''File not found'',16,1)
+        RETURN
+    END
+
+    SELECT @UsedMB = FILEPROPERTY(''' + @FileName + ''',''SpaceUsed'')/128
+
+    WHILE 1=1
+    BEGIN
+        -- Keep 20% free of used space
+        SET @TargetFreeMB = CEILING(@UsedMB * (' + CAST(@FreePercent AS VARCHAR) + ' / 100.0))
+
+        SET @TargetSizeMB = @UsedMB + @TargetFreeMB
+
+        IF @SizeMB <= @TargetSizeMB
+            BREAK
+
+        SET @BeforeSizeMB = @SizeMB
+
+        DECLARE @ShrinkToMB INT = @SizeMB - ' + CAST(@ShrinkIncrementMB AS VARCHAR) + '
+
+        DBCC SHRINKFILE (''' + @FileName + ''', @ShrinkToMB)
+
+        SELECT @SizeMB = size/128
+        FROM sys.database_files
+        WHERE name = ''' + @FileName + '''
+
+        SELECT @UsedMB = FILEPROPERTY(''' + @FileName + ''',''SpaceUsed'')/128
+
+        INSERT INTO DBADB.dbo.FileShrinkLog
+        (
+            DBName,
+            FileName,
+            FileType,
+            BeforeSizeMB,
+            AfterSizeMB,
+            UsedMB,
+            ShrinkMB,
+            TargetFreeMB,
+            LogDate
+        )
+        SELECT
+            DB_NAME(),
+            ''' + @FileName + ''',
+            type_desc,
+            @BeforeSizeMB,
+            @SizeMB,
+            @UsedMB,
+            @BeforeSizeMB - @SizeMB,
+            @TargetFreeMB,
+            GETDATE()
+        FROM sys.database_files
+        WHERE name = ''' + @FileName + '''
+    END
+    '
+
+    EXEC (@SQL)
+END
+GO
+
+
+USE [DBADB]
+GO
+
+/****** Object:  Table [dbo].[FileShrinkLog]    Script Date: 26-07-2026 15:19:48 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[FileShrinkLog](
+	[LogID] [int] IDENTITY(1,1) NOT NULL,
+	[DBName] [sysname] NOT NULL,
+	[FileName] [sysname] NOT NULL,
+	[FileType] [varchar](10) NULL,
+	[BeforeSizeMB] [int] NULL,
+	[AfterSizeMB] [int] NULL,
+	[UsedMB] [int] NULL,
+	[ShrinkMB] [int] NULL,
+	[TargetFreeMB] [int] NULL,
+	[LogDate] [datetime] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[LogID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[FileShrinkLog] ADD  DEFAULT (getdate()) FOR [LogDate]
+GO
+
+
