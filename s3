@@ -49,3 +49,23 @@ LEFT JOIN msdb.dbo.sysjobsteps s
    AND h.step_id = s.step_id
 WHERE j.name = @JobName
 ORDER BY h.instance_id DESC;
+
+DECLARE @Message NVARCHAR(MAX);
+
+SELECT TOP 1
+    @Message = h.message
+FROM msdb.dbo.sysjobhistory h
+JOIN msdb.dbo.sysjobs j
+    ON h.job_id = j.job_id
+WHERE j.name = 'Monthly_AIDB_Backup_Subplan_1'
+AND h.step_id = 2
+ORDER BY h.instance_id DESC;
+
+IF @Message LIKE '%Process Exit Code 0%'
+BEGIN
+    EXEC msdb.dbo.sp_send_dbmail
+        @profile_name = 'YourMailProfile',
+        @recipients = 'abc@company.com',
+        @subject = 'Monthly Backup Uploaded Successfully',
+        @body = @Message;
+END
