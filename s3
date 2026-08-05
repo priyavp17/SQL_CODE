@@ -69,3 +69,64 @@ BEGIN
         @subject = 'Monthly Backup Uploaded Successfully',
         @body = @Message;
 END
+
+
+USE msdb;
+GO
+
+DECLARE @JobName SYSNAME = 'Monthly_AIDB_Backup_Subplan_1';
+DECLARE @Message NVARCHAR(MAX);
+DECLARE @Body NVARCHAR(MAX);
+
+-- Get the latest AWS Upload step message
+SELECT TOP (1)
+    @Message = h.message
+FROM msdb.dbo.sysjobhistory h
+INNER JOIN msdb.dbo.sysjobs j
+    ON h.job_id = j.job_id
+WHERE j.name = @JobName
+  AND h.step_id = 2      -- AWS Upload Step
+ORDER BY h.instance_id DESC;
+
+-- Send mail only if AWS upload completed successfully
+IF @Message LIKE '%Process Exit Code 0%'
+BEGIN
+
+    SET @Body =
+'Hello Team,
+
+The database backup upload to AWS S3 has completed successfully.
+
+Upload Status : SUCCESS
+
+The following database backup files were generated and uploaded:
+
+';
+
+    SELECT @Body = @Body +
+        'Database : ' + bs.database_name + CHAR(13)+CHAR(10) +
+        'Backup File : ' + bmf.physical_device_name + CHAR(13)+CHAR(10) +
+        'Backup Completed : ' + CONVERT(VARCHAR(19),bs.backup_finish_date,120) +
+        CHAR(13)+CHAR(10)+CHAR(13)+CHAR(10)
+    FROM msdb.dbo.backupset bs
+    INNER JOIN msdb.dbo.backupmediafamily bmf
+        ON bs.media_set_id = bmf.media_set_id
+    WHERE bs.type = 'D'
+      AND bs.backup_finish_date >= DATEADD(HOUR,-2,GETDATE())
+    ORDER BY bs.backup_finish_date DESC;
+
+    SET @Body = @Body +
+'================================================
+
+AWS Upload Status : SUCCESS
+Process Exit Code : 0
+
+Regards,
+SQL Server Agent';
+
+    EXEC msdb.dbo.sp_send_dbmail
+        @profile_name = 'Your_DBMail_Profile',
+        @recipients   = 'dba@company.com',
+        @subject      = 'Database Backup Uploaded Successfully to AWS S3',
+        @body         = @Body;
+END
