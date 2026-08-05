@@ -1,0 +1,19 @@
+SELECT
+    j.name AS JobName,
+    h.step_name,
+    CASE h.run_status
+        WHEN 1 THEN 'Succeeded'
+        WHEN 0 THEN 'Failed'
+        WHEN 2 THEN 'Retry'
+        WHEN 3 THEN 'Cancelled'
+        WHEN 4 THEN 'In Progress'
+    END AS Status,
+    h.run_date,
+    h.run_time,
+    h.message
+FROM msdb.dbo.sysjobhistory h
+JOIN msdb.dbo.sysjobs j
+    ON h.job_id = j.job_id
+WHERE j.name = 'Monthly_AIDB_Backup.Subplan_1'
+  AND h.step_name = 'Monthly Full backups to S3'
+ORDER BY h.instance_id DESC;
