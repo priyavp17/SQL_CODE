@@ -1,0 +1,23 @@
+SELECT
+    SERVERPROPERTY('Edition') AS [SQL Server Edition],
+    SERVERPROPERTY('ProductVersion') AS [SQL Server Version],
+    SERVERPROPERTY('ProductLevel') AS [Product Level],
+    SERVERPROPERTY('Collation') AS [Collation],
+    @@SERVERNAME AS [Server Name],
+    CASE SERVERPROPERTY('EngineEdition')
+        WHEN 2 THEN 'Standard'
+        WHEN 3 THEN 'Enterprise/Developer'
+        WHEN 4 THEN 'Express'
+        WHEN 5 THEN 'Azure SQL Database'
+        WHEN 8 THEN 'Azure SQL Managed Instance'
+        ELSE 'Unknown'
+    END AS [Server Type];
+
+
+SELECT
+    cpu_count AS [Logical CPU Count],
+    CAST(physical_memory_kb / 1024.0 / 1024 AS DECIMAL(10,2)) AS [Physical Memory (GB)],
+    CAST(committed_kb / 1024.0 / 1024 AS DECIMAL(10,2)) AS [Committed Memory (GB)],
+    CAST(committed_target_kb / 1024.0 / 1024 AS DECIMAL(10,2)) AS [Committed Target Memory (GB)],
+    max_workers_count AS [Max Worker Threads]
+FROM sys.dm_os_sys_info;
