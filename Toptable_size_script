@@ -1,0 +1,56 @@
+IF OBJECT_ID('tempdb..#TopTables') IS NOT NULL
+    DROP TABLE #TopTables;
+
+CREATE TABLE #TopTables
+(
+    DatabaseName SYSNAME,
+    SchemaName SYSNAME,
+    TableName SYSNAME,
+    RowCount BIGINT,
+    TotalSize_MB DECIMAL(18,2),
+    UsedSize_MB DECIMAL(18,2),
+    DataSize_MB DECIMAL(18,2)
+);
+
+DECLARE @SQL NVARCHAR(MAX) = N'';
+
+SELECT @SQL += N'
+USE ' + QUOTENAME(name) + N';
+
+INSERT INTO #TopTables
+SELECT
+    DB_NAME(),
+    SCHEMA_NAME(t.schema_id),
+    t.name,
+    SUM(p.rows),
+    CAST(SUM(a.total_pages) * 8.0 / 1024 AS DECIMAL(18,2)),
+    CAST(SUM(a.used_pages) * 8.0 / 1024 AS DECIMAL(18,2)),
+    CAST(SUM(a.data_pages) * 8.0 / 1024 AS DECIMAL(18,2))
+FROM sys.tables t
+JOIN sys.indexes i
+    ON t.object_id = i.object_id
+JOIN sys.partitions p
+    ON i.object_id = p.object_id
+    AND i.index_id = p.index_id
+JOIN sys.allocation_units a
+    ON p.partition_id = a.container_id
+GROUP BY
+    t.schema_id,
+    t.name;
+'
+FROM sys.databases
+WHERE state_desc = 'ONLINE'
+  AND database_id > 4;
+
+EXEC sp_executesql @SQL;
+
+SELECT TOP 50
+    DatabaseName,
+    SchemaName,
+    TableName,
+    RowCount,
+    TotalSize_MB,
+    UsedSize_MB,
+    DataSize_MB
+FROM #TopTables
+ORDER BY TotalSize_MB DESC;
