@@ -1,0 +1,415 @@
+/* ============================================================
+   SQL SERVER DATABASE PERFORMANCE & COST OPTIMIZATION CHECKS
+   ============================================================ */
+
+
+/* 1. DATABASE SIZE
+   Identify databases consuming the most storage
+*/
+SELECT
+    DB_NAME(database_id) AS DatabaseName,
+    SUM(CASE WHEN type_desc = 'ROWS' THEN size ELSE 0 END) * 8 / 1024 AS DataSize_MB,
+    SUM(CASE WHEN type_desc = 'LOG' THEN size ELSE 0 END) * 8 / 1024 AS LogSize_MB,
+    SUM(size) * 8 / 1024 AS TotalSize_MB
+FROM sys.master_files
+GROUP BY database_id
+ORDER BY TotalSize_MB DESC;
+
+
+/* 2. DATABASE FILE SIZE & GROWTH
+   Identify oversized files and potentially unsuitable growth settings
+*/
+SELECT
+    DB_NAME(database_id) AS DatabaseName,
+    name AS LogicalFileName,
+    type_desc AS FileType,
+    physical_name,
+    size * 8 / 1024 AS CurrentSize_MB,
+    CASE
+        WHEN is_percent_growth = 1
+            THEN CAST(growth AS VARCHAR(20)) + '%'
+        ELSE CAST(growth * 8 / 1024 AS VARCHAR(20)) + ' MB'
+    END AS GrowthSetting,
+    is_percent_growth
+FROM sys.master_files
+ORDER BY size DESC;
+
+
+/* 3. LARGEST TABLES
+   Identify tables consuming the most database storage
+*/
+SELECT TOP 50
+    SCHEMA_NAME(t.schema_id) AS SchemaName,
+    t.name AS TableName,
+    SUM(p.rows) AS RowCount,
+    SUM(a.total_pages) * 8 / 1024 AS TotalSize_MB,
+    SUM(a.used_pages) * 8 / 1024 AS UsedSize_MB,
+    SUM(a.data_pages) * 8 / 1024 AS DataSize_MB
+FROM sys.tables t
+JOIN sys.indexes i
+    ON t.object_id = i.object_id
+JOIN sys.partitions p
+    ON i.object_id = p.object_id
+    AND i.index_id = p.index_id
+JOIN sys.allocation_units a
+    ON p.partition_id = a.container_id
+GROUP BY
+    t.schema_id,
+    t.name
+ORDER BY TotalSize_MB DESC;
+
+
+/* 4. TRANSACTION LOG USAGE
+   Run this query from the database being assessed
+*/
+DBCC SQLPERF(LOGSPACE);
+
+
+/* 5. LOG REUSE WAIT
+   Identify why transaction log space may not be reusable
+*/
+SELECT
+    name AS DatabaseName,
+    recovery_model_desc,
+    log_reuse_wait_desc
+FROM sys.databases
+ORDER BY name;
+
+
+/* 6. TOP CPU-CONSUMING QUERIES
+   Alternative to Query Store
+*/
+SELECT TOP 20
+    DB_NAME(st.dbid) AS DatabaseName,
+    qs.execution_count,
+    qs.total_worker_time / 1000 AS Total_CPU_ms,
+    (qs.total_worker_time / NULLIF(qs.execution_count, 0)) / 1000 AS Avg_CPU_ms,
+    qs.total_elapsed_time / 1000 AS Total_Elapsed_ms,
+    qs.total_logical_reads AS Total_Logical_Reads,
+    qs.total_logical_writes AS Total_Logical_Writes,
+    qs.last_execution_time,
+    st.text AS QueryText
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+ORDER BY qs.total_worker_time DESC;
+
+
+/* 7. TOP LOGICAL-READ QUERIES
+   Identify queries generating high buffer-pool I/O
+*/
+SELECT TOP 20
+    DB_NAME(st.dbid) AS DatabaseName,
+    qs.execution_count,
+    qs.total_logical_reads AS Total_Logical_Reads,
+    qs.total_logical_reads /
+        NULLIF(qs.execution_count, 0) AS Avg_Logical_Reads,
+    qs.total_logical_writes AS Total_Logical_Writes,
+    qs.last_execution_time,
+    st.text AS QueryText
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+ORDER BY qs.total_logical_reads DESC;
+
+
+/* 8. TOP LONG-RUNNING QUERIES
+*/
+SELECT TOP 20
+    DB_NAME(st.dbid) AS DatabaseName,
+    qs.execution_count,
+    qs.total_elapsed_time / 1000 AS Total_Elapsed_ms,
+    (qs.total_elapsed_time /
+        NULLIF(qs.execution_count, 0)) / 1000 AS Avg_Elapsed_ms,
+    qs.last_execution_time,
+    st.text AS QueryText
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+ORDER BY qs.total_elapsed_time DESC;
+
+
+/* 9. WAIT STATISTICS
+   Identify major SQL Server wait categories
+*/
+SELECT TOP 30
+    wait_type,
+    waiting_tasks_count,
+    wait_time_ms,
+    signal_wait_time_ms,
+    wait_time_ms - signal_wait_time_ms AS Resource_Wait_ms
+FROM sys.dm_os_wait_stats
+WHERE wait_type NOT IN
+(
+    'BROKER_TASK_STOP',
+    'BROKER_TO_FLUSH',
+    'SQLTRACE_BUFFER_FLUSH',
+    'CLR_AUTO_EVENT',
+    'CLR_MANUAL_EVENT',
+    'SLEEP_TASK',
+    'SLEEP_SYSTEMTASK',
+    'XE_DISPATCHER_WAIT',
+    'XE_TIMER_EVENT',
+    'WAITFOR',
+    'LAZYWRITER_SLEEP',
+    'RESOURCE_QUEUE',
+    'REQUEST_FOR_DEADLOCK_SEARCH',
+    'LOGMGR_QUEUE',
+    'CHECKPOINT_QUEUE',
+    'DIRTY_PAGE_POLL'
+)
+ORDER BY wait_time_ms DESC;
+
+
+/* 10. CURRENT BLOCKING
+*/
+SELECT
+    r.session_id,
+    r.blocking_session_id,
+    r.status,
+    r.command,
+    DB_NAME(r.database_id) AS DatabaseName,
+    r.wait_type,
+    r.wait_time,
+    r.wait_resource,
+    s.login_name,
+    s.host_name,
+    s.program_name,
+    r.cpu_time,
+    r.total_elapsed_time,
+    st.text AS QueryText
+FROM sys.dm_exec_requests r
+JOIN sys.dm_exec_sessions s
+    ON r.session_id = s.session_id
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
+WHERE r.blocking_session_id <> 0
+ORDER BY r.wait_time DESC;
+
+
+/* 11. ACTIVE TRANSACTIONS
+*/
+SELECT
+    s.session_id,
+    s.login_name,
+    s.host_name,
+    s.program_name,
+    at.transaction_begin_time,
+    DATEDIFF(
+        MINUTE,
+        at.transaction_begin_time,
+        GETDATE()
+    ) AS Transaction_Age_Minutes,
+    DB_NAME(dt.database_id) AS DatabaseName
+FROM sys.dm_tran_active_transactions at
+JOIN sys.dm_tran_session_transactions st
+    ON at.transaction_id = st.transaction_id
+JOIN sys.dm_exec_sessions s
+    ON st.session_id = s.session_id
+JOIN sys.dm_tran_database_transactions dt
+    ON at.transaction_id = dt.transaction_id
+ORDER BY at.transaction_begin_time;
+
+
+/* 12. INDEX FRAGMENTATION
+   Run from the database being assessed
+*/
+SELECT
+    OBJECT_SCHEMA_NAME(ps.object_id) AS SchemaName,
+    OBJECT_NAME(ps.object_id) AS TableName,
+    i.name AS IndexName,
+    ps.page_count,
+    ps.avg_fragmentation_in_percent
+FROM sys.dm_db_index_physical_stats
+(
+    DB_ID(),
+    NULL,
+    NULL,
+    NULL,
+    'LIMITED'
+) ps
+JOIN sys.indexes i
+    ON ps.object_id = i.object_id
+    AND ps.index_id = i.index_id
+WHERE ps.page_count > 1000
+ORDER BY ps.avg_fragmentation_in_percent DESC;
+
+
+/* 13. INDEX USAGE
+   Identify indexes with high maintenance but low read usage
+*/
+SELECT
+    OBJECT_SCHEMA_NAME(i.object_id) AS SchemaName,
+    OBJECT_NAME(i.object_id) AS TableName,
+    i.name AS IndexName,
+    i.index_id,
+    ISNULL(us.user_seeks, 0) AS UserSeeks,
+    ISNULL(us.user_scans, 0) AS UserScans,
+    ISNULL(us.user_lookups, 0) AS UserLookups,
+    ISNULL(us.user_updates, 0) AS UserUpdates
+FROM sys.indexes i
+LEFT JOIN sys.dm_db_index_usage_stats us
+    ON i.object_id = us.object_id
+    AND i.index_id = us.index_id
+    AND us.database_id = DB_ID()
+WHERE i.index_id > 0
+ORDER BY ISNULL(us.user_updates, 0) DESC;
+
+
+/* 14. MISSING INDEX RECOMMENDATIONS
+*/
+SELECT TOP 20
+    DB_NAME(mid.database_id) AS DatabaseName,
+    OBJECT_SCHEMA_NAME(
+        mid.object_id,
+        mid.database_id
+    ) AS SchemaName,
+    OBJECT_NAME(
+        mid.object_id,
+        mid.database_id
+    ) AS TableName,
+    migs.user_seeks,
+    migs.user_scans,
+    migs.avg_total_user_cost,
+    migs.avg_user_impact,
+    mid.equality_columns,
+    mid.inequality_columns,
+    mid.included_columns
+FROM sys.dm_db_missing_index_group_stats migs
+JOIN sys.dm_db_missing_index_groups mig
+    ON migs.group_handle = mig.index_group_handle
+JOIN sys.dm_db_missing_index_details mid
+    ON mig.index_handle = mid.index_handle
+ORDER BY
+    migs.avg_user_impact * migs.user_seeks DESC;
+
+
+/* 15. STATISTICS
+   Identify statistics with a high number of modifications
+*/
+SELECT
+    OBJECT_SCHEMA_NAME(s.object_id) AS SchemaName,
+    OBJECT_NAME(s.object_id) AS TableName,
+    s.name AS StatisticsName,
+    sp.last_updated,
+    sp.rows,
+    sp.rows_sampled,
+    sp.modification_counter
+FROM sys.stats s
+CROSS APPLY sys.dm_db_stats_properties
+(
+    s.object_id,
+    s.stats_id
+) sp
+WHERE sp.last_updated IS NOT NULL
+ORDER BY sp.modification_counter DESC;
+
+
+/* 16. TEMPDB FILE CONFIGURATION
+*/
+USE tempdb;
+
+SELECT
+    name AS LogicalFileName,
+    physical_name,
+    size * 8 / 1024 AS Size_MB,
+    CASE
+        WHEN is_percent_growth = 1
+            THEN CAST(growth AS VARCHAR(20)) + '%'
+        ELSE CAST(growth * 8 / 1024 AS VARCHAR(20)) + ' MB'
+    END AS GrowthSetting,
+    is_percent_growth
+FROM sys.database_files;
+
+
+/* 17. TEMPDB SPACE USAGE
+*/
+SELECT
+    SUM(size) * 8 / 1024 AS TotalSize_MB,
+    SUM(FILEPROPERTY(name, 'SpaceUsed')) * 8 / 1024 AS UsedSize_MB,
+    (
+        SUM(size) -
+        SUM(FILEPROPERTY(name, 'SpaceUsed'))
+    ) * 8 / 1024 AS FreeSize_MB
+FROM sys.database_files;
+
+
+/* 18. DATABASE CONFIGURATION
+*/
+SELECT
+    name AS DatabaseName,
+    state_desc,
+    recovery_model_desc,
+    compatibility_level,
+    page_verify_option_desc,
+    is_auto_close_on,
+    is_auto_shrink_on,
+    is_read_only
+FROM sys.databases
+ORDER BY name;
+
+
+/* 19. SQL SERVER PERFORMANCE CONFIGURATION
+*/
+SELECT
+    name,
+    value,
+    value_in_use,
+    description
+FROM sys.configurations
+WHERE name IN
+(
+    'max degree of parallelism',
+    'cost threshold for parallelism',
+    'max server memory (MB)',
+    'min server memory (MB)',
+    'backup compression default',
+    'optimize for ad hoc workloads'
+)
+ORDER BY name;
+
+
+/* 20. SQL SERVER AGENT JOBS
+*/
+SELECT
+    j.name AS JobName,
+    j.enabled,
+    js.step_id,
+    js.step_name,
+    js.subsystem,
+    js.database_name,
+    js.command
+FROM msdb.dbo.sysjobs j
+LEFT JOIN msdb.dbo.sysjobsteps js
+    ON j.job_id = js.job_id
+ORDER BY j.name, js.step_id;
+
+
+/* 21. SQL AGENT JOB HISTORY
+*/
+SELECT TOP 50
+    j.name AS JobName,
+    h.run_date,
+    h.run_time,
+    h.run_duration,
+    h.run_status,
+    h.message
+FROM msdb.dbo.sysjobhistory h
+JOIN msdb.dbo.sysjobs j
+    ON h.job_id = j.job_id
+WHERE h.step_id = 0
+ORDER BY h.instance_id DESC;
+
+
+/* 22. BACKUP HISTORY
+*/
+SELECT TOP 100
+    database_name,
+    type AS BackupType,
+    backup_start_date,
+    backup_finish_date,
+    DATEDIFF(
+        SECOND,
+        backup_start_date,
+        backup_finish_date
+    ) AS Duration_Seconds,
+    backup_size / 1024 / 1024 AS Backup_Size_MB,
+    compressed_backup_size / 1024 / 1024 AS Compressed_Size_MB
+FROM msdb.dbo.backupset
+ORDER BY backup_start_date DESC;
