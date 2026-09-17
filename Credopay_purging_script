@@ -1,0 +1,659 @@
+USE [DBADB]
+GO
+/****** Object:  StoredProcedure [dbo].[AT_TERMINALS_PURGING]    Script Date: 9/17/2026 10:56:25 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[AT_TERMINALS_PURGING]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    --===============================
+    -- 1. Declare Variables
+    --===============================
+    DECLARE @sSQL NVARCHAR(MAX);
+    DECLARE @SourceTableName SYSNAME = ' [MARSPROD].[dbo].[AT_TERMINALS]';
+    DECLARE @DestinationTableName SYSNAME = '[ARCHIVED].[dbo].[AT_TERMINALS_ARCHIVED]';
+    
+	DECLARE @filter NVARCHAR(MAX) ='AT_TRL_LAST_UPDATED < ''2026-04-01'''; 
+	DECLARE @column NVARCHAR(MAX) ='AT_TRL_SER_NUMBER';
+	
+    DECLARE @ExecutionId UNIQUEIDENTIFIER = NEWID(); -- Unique run ID
+    DECLARE @filter_log NVARCHAR(MAX) = @filter + ' | RunId=' + CAST(@ExecutionId AS NVARCHAR(36));
+
+    DECLARE @ID INT;                     -- New IID_NEW for this run
+    DECLARE @rCount BIGINT;              
+    DECLARE @TotalrCount BIGINT = 0;
+    DECLARE @BatchSize INT = 100000;
+    DECLARE @MaxBatchSize INT = 1000000;
+    DECLARE @starttime DATETIME;
+    DECLARE @endtime DATETIME;
+
+    --===============================
+    -- 2. Insert New Master Row
+    --===============================
+    INSERT INTO TBL_RETENTION_MASTER_Auto (SourceTableName, DestinationTableName, Filter, LastUpdated)
+    VALUES (@SourceTableName, @DestinationTableName, @filter_log, GETDATE());
+
+    -- Capture new row ID for this execution
+    SET @ID = SCOPE_IDENTITY();
+    PRINT 'Processing IID_NEW: ' + CAST(@ID AS VARCHAR);
+
+    --===============================
+    -- 3. Archival Loop
+    --===============================
+    UPDATE_BATCH:
+    SET @starttime = GETDATE();
+
+    BEGIN TRANSACTION;
+    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
+	DECLARE @RowCount INT;
+
+    -- Build dynamic SQL for batch archival using CTE with READPAST
+	--SET IDENTITY_INSERT ' + @DestinationTableName + N' ON;
+	SET @sSQL = 
+N';WITH CTE_ToDelete AS (
+    SELECT TOP (' + CAST(@BatchSize AS NVARCHAR(10)) + N') 
+	 [AT_TRL_SER_NUMBER]
+      ,[AT_CHANGE_TYPE]
+      ,[AT_TRL_SERIAL_NUMBER]
+      ,[AT_TRL_LAST_UPDATED]
+      ,[AT_TRL_UPDATED_USER]
+      ,[AT_TRL_INS_CODE]
+      ,[AT_TRL_GEN_STATUS]
+      ,[AT_TRL_AGR_SER_NUMBER]
+      ,[AT_TRL_STATUS]
+      ,[AT_TRL_STATUS_DATE]
+      ,[AT_TRL_MAP_SER_NUMBER]
+      ,[AT_TRL_MERCHANT_ID]
+      ,[AT_TRL_TERMINAL_ID]
+      ,[AT_TRL_MVISA_QR]
+      ,[AT_TRL_MPASS_QR]
+      ,[AT_TRL_RUPAY_QR]
+      ,[AT_TRL_AMEX_QR]
+      ,[AT_TRL_CUR_CODE]
+      ,[AT_TRL_LOCATION]
+      ,[AT_TRL_ADDRESS]
+      ,[AT_TRL_STE_CODE]
+      ,[AT_TRL_STE_NAME]
+      ,[AT_TRL_CITY]
+      ,[AT_TRL_PIN_CODE]
+      ,[AT_TRL_MODEL]
+      ,[AT_TRL_DEVICE_OWNED]
+      ,[AT_TRL_DEVICE_PRICE]
+      ,[AT_TRL_INSTALLATION_FEE]
+      ,[AT_TRL_RENTAL_TYPE]
+      ,[AT_TRL_RENTAL_MODE]
+      ,[AT_TRL_RENTAL_PLAN]
+      ,[AT_TRL_RENTAL_AMOUNT]
+      ,[AT_TRL_RENTAL_FREQUENCY]
+      ,[AT_TRL_ADVANCE_RENT_AMOUNT]
+      ,[AT_TRL_ADVANCE_PAID_MONTH]
+      ,[AT_TRL_GRACE_PERIOD]
+      ,[AT_TRL_RENTAL_START_DATE]
+      ,[AT_TRL_NEXT_RENTAL_DATE]
+      ,[AT_TRL_RENTAL_THRESHOLD]
+      ,[AT_TRL_CURRENT_VOLUME]
+      ,[AT_TRL_MONTHLY_SERVICE_FEE]
+      ,[AT_TRL_NEXT_FEE_DATE]
+      ,[AT_TRL_MAX_DAILY_USAGE_LIMIT]
+      ,[AT_TRL_MAX_WEEKLY_USAGE_LIMIT]
+      ,[AT_TRL_MAX_MONTHLY_USAGE_LIMIT]
+      ,[AT_TRL_VELOCITY_CHECK_MINUTES]
+      ,[AT_TRL_VELOCITY_CHECK_COUNT]
+      ,[AT_TRL_DEVICE_SERIAL_NUMBER]
+      ,[AT_TRL_INSTALLATION_DATE]
+      ,[AT_TRL_DEINSTALL_DATE]
+      ,[AT_TRL_SIM_NUMBER]
+      ,[AT_TRL_TYPE]
+      ,[AT_TRL_UPI_TERMINAL_TYPE]
+      ,[AT_TRL_UPI_OFFLINE_TYPE]
+      ,[AT_TRL_UPI_VPA]
+      ,[AT_TRL_UPI_BANK_ID]
+    FROM ' + @SourceTableName + N' WITH (READPAST, ROWLOCK)
+    WHERE ' + @filter + N'
+    ORDER BY ' + @column + N'
+)
+DELETE FROM CTE_ToDelete
+OUTPUT 
+	Deleted.[AT_TRL_SER_NUMBER]
+,Deleted.[AT_CHANGE_TYPE]
+,Deleted.[AT_TRL_SERIAL_NUMBER]
+,Deleted.[AT_TRL_LAST_UPDATED]
+,Deleted.[AT_TRL_UPDATED_USER]
+,Deleted.[AT_TRL_INS_CODE]
+,Deleted.[AT_TRL_GEN_STATUS]
+,Deleted.[AT_TRL_AGR_SER_NUMBER]
+,Deleted.[AT_TRL_STATUS]
+,Deleted.[AT_TRL_STATUS_DATE]
+,Deleted.[AT_TRL_MAP_SER_NUMBER]
+,Deleted.[AT_TRL_MERCHANT_ID]
+,Deleted.[AT_TRL_TERMINAL_ID]
+,Deleted.[AT_TRL_MVISA_QR]
+,Deleted.[AT_TRL_MPASS_QR]
+,Deleted.[AT_TRL_RUPAY_QR]
+,Deleted.[AT_TRL_AMEX_QR]
+,Deleted.[AT_TRL_CUR_CODE]
+,Deleted.[AT_TRL_LOCATION]
+,Deleted.[AT_TRL_ADDRESS]
+,Deleted.[AT_TRL_STE_CODE]
+,Deleted.[AT_TRL_STE_NAME]
+,Deleted.[AT_TRL_CITY]
+,Deleted.[AT_TRL_PIN_CODE]
+,Deleted.[AT_TRL_MODEL]
+,Deleted.[AT_TRL_DEVICE_OWNED]
+,Deleted.[AT_TRL_DEVICE_PRICE]
+,Deleted.[AT_TRL_INSTALLATION_FEE]
+,Deleted.[AT_TRL_RENTAL_TYPE]
+,Deleted.[AT_TRL_RENTAL_MODE]
+,Deleted.[AT_TRL_RENTAL_PLAN]
+,Deleted.[AT_TRL_RENTAL_AMOUNT]
+,Deleted.[AT_TRL_RENTAL_FREQUENCY]
+,Deleted.[AT_TRL_ADVANCE_RENT_AMOUNT]
+,Deleted.[AT_TRL_ADVANCE_PAID_MONTH]
+,Deleted.[AT_TRL_GRACE_PERIOD]
+,Deleted.[AT_TRL_RENTAL_START_DATE]
+,Deleted.[AT_TRL_NEXT_RENTAL_DATE]
+,Deleted.[AT_TRL_RENTAL_THRESHOLD]
+,Deleted.[AT_TRL_CURRENT_VOLUME]
+,Deleted.[AT_TRL_MONTHLY_SERVICE_FEE]
+,Deleted.[AT_TRL_NEXT_FEE_DATE]
+,Deleted.[AT_TRL_MAX_DAILY_USAGE_LIMIT]
+,Deleted.[AT_TRL_MAX_WEEKLY_USAGE_LIMIT]
+,Deleted.[AT_TRL_MAX_MONTHLY_USAGE_LIMIT]
+,Deleted.[AT_TRL_VELOCITY_CHECK_MINUTES]
+,Deleted.[AT_TRL_VELOCITY_CHECK_COUNT]
+,Deleted.[AT_TRL_DEVICE_SERIAL_NUMBER]
+,Deleted.[AT_TRL_INSTALLATION_DATE]
+,Deleted.[AT_TRL_DEINSTALL_DATE]
+,Deleted.[AT_TRL_SIM_NUMBER]
+,Deleted.[AT_TRL_TYPE]
+,Deleted.[AT_TRL_UPI_TERMINAL_TYPE]
+,Deleted.[AT_TRL_UPI_OFFLINE_TYPE]
+,Deleted.[AT_TRL_UPI_VPA]
+,Deleted.[AT_TRL_UPI_BANK_ID]  
+INTO ' + @DestinationTableName + N'(
+[AT_TRL_SER_NUMBER]
+      ,[AT_CHANGE_TYPE]
+      ,[AT_TRL_SERIAL_NUMBER]
+      ,[AT_TRL_LAST_UPDATED]
+      ,[AT_TRL_UPDATED_USER]
+      ,[AT_TRL_INS_CODE]
+      ,[AT_TRL_GEN_STATUS]
+      ,[AT_TRL_AGR_SER_NUMBER]
+      ,[AT_TRL_STATUS]
+      ,[AT_TRL_STATUS_DATE]
+      ,[AT_TRL_MAP_SER_NUMBER]
+      ,[AT_TRL_MERCHANT_ID]
+      ,[AT_TRL_TERMINAL_ID]
+      ,[AT_TRL_MVISA_QR]
+      ,[AT_TRL_MPASS_QR]
+      ,[AT_TRL_RUPAY_QR]
+      ,[AT_TRL_AMEX_QR]
+      ,[AT_TRL_CUR_CODE]
+      ,[AT_TRL_LOCATION]
+      ,[AT_TRL_ADDRESS]
+      ,[AT_TRL_STE_CODE]
+      ,[AT_TRL_STE_NAME]
+      ,[AT_TRL_CITY]
+      ,[AT_TRL_PIN_CODE]
+      ,[AT_TRL_MODEL]
+      ,[AT_TRL_DEVICE_OWNED]
+      ,[AT_TRL_DEVICE_PRICE]
+      ,[AT_TRL_INSTALLATION_FEE]
+      ,[AT_TRL_RENTAL_TYPE]
+      ,[AT_TRL_RENTAL_MODE]
+      ,[AT_TRL_RENTAL_PLAN]
+      ,[AT_TRL_RENTAL_AMOUNT]
+      ,[AT_TRL_RENTAL_FREQUENCY]
+      ,[AT_TRL_ADVANCE_RENT_AMOUNT]
+      ,[AT_TRL_ADVANCE_PAID_MONTH]
+      ,[AT_TRL_GRACE_PERIOD]
+      ,[AT_TRL_RENTAL_START_DATE]
+      ,[AT_TRL_NEXT_RENTAL_DATE]
+      ,[AT_TRL_RENTAL_THRESHOLD]
+      ,[AT_TRL_CURRENT_VOLUME]
+      ,[AT_TRL_MONTHLY_SERVICE_FEE]
+      ,[AT_TRL_NEXT_FEE_DATE]
+      ,[AT_TRL_MAX_DAILY_USAGE_LIMIT]
+      ,[AT_TRL_MAX_WEEKLY_USAGE_LIMIT]
+      ,[AT_TRL_MAX_MONTHLY_USAGE_LIMIT]
+      ,[AT_TRL_VELOCITY_CHECK_MINUTES]
+      ,[AT_TRL_VELOCITY_CHECK_COUNT]
+      ,[AT_TRL_DEVICE_SERIAL_NUMBER]
+      ,[AT_TRL_INSTALLATION_DATE]
+      ,[AT_TRL_DEINSTALL_DATE]
+      ,[AT_TRL_SIM_NUMBER]
+      ,[AT_TRL_TYPE]
+      ,[AT_TRL_UPI_TERMINAL_TYPE]
+      ,[AT_TRL_UPI_OFFLINE_TYPE]
+      ,[AT_TRL_UPI_VPA]
+      ,[AT_TRL_UPI_BANK_ID]
+    );
+
+	SET @RowCount = @@ROWCOUNT;';
+	--SET IDENTITY_INSERT ' + @DestinationTableName + N' OFF;
+	PRINT @sSQL;
+	EXEC sys.sp_executesql @sSQL, N'@RowCount INT OUTPUT', @RowCount = @rCount OUTPUT;
+	-- Get number of rows moved in this batch
+	PRINT 'Batch Rows Moved: ' + CAST(ISNULL(@rCount, 0) AS VARCHAR(30));
+
+	COMMIT;  -- Commit fast to release locks
+
+    --===============================
+    -- 4. Logging
+    --===============================
+    IF @rCount > 0
+    BEGIN
+        SET @TotalrCount = @TotalrCount + @rCount;
+
+        -- Log batch archival
+        INSERT INTO tbl_Retention_Logs_Auto (SourceTableName, DestinationTableName, TotalDataTransfered, Comment, EntryDate)
+        VALUES (@SourceTableName, @DestinationTableName, @rCount, 'Successfully - Archived', GETDATE());
+
+        -- Update the master table row for this execution (after commit to avoid blocking SELECT)
+        UPDATE TBL_RETENTION_MASTER_Auto
+        SET LastUpdated = GETDATE(), [Rows] = ISNULL(@TotalrCount, 0)
+        WHERE IID_NEW = @ID;
+    END
+    ELSE
+    BEGIN
+        -- Log no records found
+        INSERT INTO tbl_Retention_Logs_Auto (SourceTableName, DestinationTableName, TotalDataTransfered, Comment, EntryDate)
+        VALUES (@SourceTableName, @DestinationTableName, 0, 'No Records Found or Already Archived', GETDATE());
+    END
+
+    --===============================
+    -- 5. Adjust Batch Size Dynamically
+    --===============================
+    SET @endtime = GETDATE();
+    PRINT 'Execution Time: ' + CAST(DATEDIFF(SECOND, @starttime, @endtime) AS VARCHAR(3)) + ' Sec';
+
+    IF DATEDIFF(SECOND, @starttime, @endtime) < 30
+    BEGIN
+        IF (@BatchSize < @MaxBatchSize)
+            SET @BatchSize = @BatchSize + 1000;
+    END
+    ELSE IF (DATEDIFF(SECOND, @starttime, @endtime) > 30)
+    BEGIN
+        SET @BatchSize = @BatchSize - 1000;
+        IF (@BatchSize < 1000)
+            SET @BatchSize = 1000;
+    END
+
+    -- Wait to avoid overwhelming live transactions
+    WAITFOR DELAY '00:00:01';
+
+    -- Continue if rows still exist
+    IF @rCount > 0 GOTO UPDATE_BATCH;
+
+    --===============================
+    -- 6. Final Update for This Execution
+    --===============================
+    UPDATE TBL_RETENTION_MASTER_Auto
+    SET LastUpdated = GETDATE(),
+        [Rows] = ISNULL(@TotalrCount, 0)
+    WHERE IID_NEW = @ID;
+
+    PRINT 'Archival Completed Successfully. Total Rows Archived: ' + CAST(@TotalrCount AS VARCHAR(30));
+END;
+
+
+USE [DBADB]
+GO
+/****** Object:  StoredProcedure [dbo].[AT_TERMINAL_DATA_PURGING]    Script Date: 9/17/2026 10:47:44 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[AT_TERMINAL_DATA_PURGING]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    --===============================
+    -- 1. Declare Variables
+    --===============================
+    DECLARE @sSQL NVARCHAR(MAX);
+    DECLARE @SourceTableName SYSNAME = ' [MARSPROD].[dbo].[AT_TERMINAL_DATA]';
+    DECLARE @DestinationTableName SYSNAME = '[ARCHIVED].[dbo].[AT_TERMINAL_DATA_ARCHIVED]';
+    
+	DECLARE @filter NVARCHAR(MAX) ='AT_TED_LAST_UPDATED < ''2026-04-01'''; 
+	DECLARE @column NVARCHAR(MAX) ='AT_TED_SER_NUMBER';
+	
+    DECLARE @ExecutionId UNIQUEIDENTIFIER = NEWID(); -- Unique run ID
+    DECLARE @filter_log NVARCHAR(MAX) = @filter + ' | RunId=' + CAST(@ExecutionId AS NVARCHAR(36));
+
+    DECLARE @ID INT;                     -- New IID_NEW for this run
+    DECLARE @rCount BIGINT;              
+    DECLARE @TotalrCount BIGINT = 0;
+    DECLARE @BatchSize INT = 100000;
+    DECLARE @MaxBatchSize INT = 1000000;
+    DECLARE @starttime DATETIME;
+    DECLARE @endtime DATETIME;
+
+    --===============================
+    -- 2. Insert New Master Row
+    --===============================
+    INSERT INTO TBL_RETENTION_MASTER_Auto (SourceTableName, DestinationTableName, Filter, LastUpdated)
+    VALUES (@SourceTableName, @DestinationTableName, @filter_log, GETDATE());
+
+    -- Capture new row ID for this execution
+    SET @ID = SCOPE_IDENTITY();
+    PRINT 'Processing IID_NEW: ' + CAST(@ID AS VARCHAR);
+
+    --===============================
+    -- 3. Archival Loop
+    --===============================
+    UPDATE_BATCH:
+    SET @starttime = GETDATE();
+
+    BEGIN TRANSACTION;
+    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
+	DECLARE @RowCount INT;
+
+    -- Build dynamic SQL for batch archival using CTE with READPAST
+	--SET IDENTITY_INSERT ' + @DestinationTableName + N' ON;
+	SET @sSQL = 
+N';WITH CTE_ToDelete AS (
+    SELECT TOP (' + CAST(@BatchSize AS NVARCHAR(10)) + N') 
+	 [AT_TED_SER_NUMBER]
+      ,[AT_TED_CHANGE_TYPE]
+      ,[AT_TED_SERIAL_NUMBER]
+      ,[AT_TED_UPDATED_USER]
+      ,[AT_TED_LAST_UPDATED]
+      ,[AT_TED_INS_CODE]
+      ,[AT_TED_GEN_STATUS]
+      ,[AT_TED_AGR_SER_NUMBER]
+      ,[AT_TED_STATUS]
+      ,[AT_TED_STATUS_DATE]
+      ,[AT_TED_CREATED_USER]
+      ,[AT_TED_CREATED_DATE]
+      ,[AT_TED_VERIFIED_USER]
+      ,[AT_TED_VERIFIED_DATE]
+      ,[AT_TED_APPROVED_USER]
+      ,[AT_TED_APPROVED_DATE]
+      ,[AT_TED_MAP_SER_NUMBER]
+      ,[AT_TED_MERCHANT_ID]
+      ,[AT_TED_TERMINAL_ID]
+      ,[AT_TED_MVISA_QR]
+      ,[AT_TED_MPASS_QR]
+      ,[AT_TED_RUPAY_QR]
+      ,[AT_TED_AMEX_QR]
+      ,[AT_TED_CUR_CODE]
+      ,[AT_TED_LOCATION]
+      ,[AT_TED_ADDRESS]
+      ,[AT_TED_STE_CODE]
+      ,[AT_TED_STE_NAME]
+      ,[AT_TED_CITY]
+      ,[AT_TED_PIN_CODE]
+      ,[AT_TED_MODEL]
+      ,[AT_TED_DEVICE_OWNED]
+      ,[AT_TED_DEVICE_PRICE]
+      ,[AT_TED_INSTALLATION_FEE]
+      ,[AT_TED_RENTAL_TYPE]
+      ,[AT_TED_RENTAL_MODE]
+      ,[AT_TED_RENTAL_PLAN]
+      ,[AT_TED_RENTAL_AMOUNT]
+      ,[AT_TED_RENTAL_FREQUENCY]
+      ,[AT_TED_ADVANCE_RENT_AMOUNT]
+      ,[AT_TED_ADVANCE_PAID_MONTH]
+      ,[AT_TED_GRACE_PERIOD]
+      ,[AT_TED_RENTAL_START_DATE]
+      ,[AT_TED_NEXT_RENTAL_DATE]
+      ,[AT_TED_RENTAL_THRESHOLD]
+      ,[AT_TED_CURRENT_VOLUME]
+      ,[AT_TED_MONTHLY_SERVICE_FEE]
+      ,[AT_TED_NEXT_FEE_DATE]
+      ,[AT_TED_MAX_DAILY_USAGE_LIMIT]
+      ,[AT_TED_MAX_WEEKLY_USAGE_LIMIT]
+      ,[AT_TED_MAX_MONTHLY_USAGE_LIMIT]
+      ,[AT_TED_VELOCITY_CHECK_MINUTES]
+      ,[AT_TED_VELOCITY_CHECK_COUNT]
+      ,[AT_TED_DEVICE_SERIAL_NUMBER]
+      ,[AT_TED_INSTALLATION_DATE]
+      ,[AT_TED_DEINSTALL_DATE]
+      ,[AT_TED_NOF_TERMINALS]
+      ,[AT_TED_FRM_UPDATE_FLAG]
+      ,[AT_TED_SWITCH_UPDATE_FLAG]
+      ,[AT_TED_REMARKS]
+      ,[AT_TED_SIM_NUMBER]
+      ,[AT_TED_TYPE]
+      ,[AT_TED_ACTIVATION_DATE]
+      ,[AT_TED_ACTIVATED_BY]
+      ,[AT_TED_DEACTIVATE_DATE]
+      ,[AT_TED_DEACTIVATED_BY]
+      ,[AT_TED_UPI_TERMINAL_TYPE]
+      ,[AT_TED_UPI_OFFLINE_TYPE]
+      ,[AT_TED_UPI_VPA]
+      ,[AT_TED_UPI_BANK_ID]
+      ,[AT_TED_IMEI_NUMBER]
+      ,[AT_TED_TERMINAL_NAME]
+    FROM ' + @SourceTableName + N' WITH (READPAST, ROWLOCK)
+    WHERE ' + @filter + N'
+    ORDER BY ' + @column + N'
+)
+DELETE FROM CTE_ToDelete
+OUTPUT 
+	Deleted.[AT_TED_SER_NUMBER]
+,Deleted.[AT_TED_CHANGE_TYPE]
+,Deleted.[AT_TED_SERIAL_NUMBER]
+,Deleted.[AT_TED_UPDATED_USER]
+,Deleted.[AT_TED_LAST_UPDATED]
+,Deleted.[AT_TED_INS_CODE]
+,Deleted.[AT_TED_GEN_STATUS]
+,Deleted.[AT_TED_AGR_SER_NUMBER]
+,Deleted.[AT_TED_STATUS]
+,Deleted.[AT_TED_STATUS_DATE]
+,Deleted.[AT_TED_CREATED_USER]
+,Deleted.[AT_TED_CREATED_DATE]
+,Deleted.[AT_TED_VERIFIED_USER]
+,Deleted.[AT_TED_VERIFIED_DATE]
+,Deleted.[AT_TED_APPROVED_USER]
+,Deleted.[AT_TED_APPROVED_DATE]
+,Deleted.[AT_TED_MAP_SER_NUMBER]
+,Deleted.[AT_TED_MERCHANT_ID]
+,Deleted.[AT_TED_TERMINAL_ID]
+,Deleted.[AT_TED_MVISA_QR]
+,Deleted.[AT_TED_MPASS_QR]
+,Deleted.[AT_TED_RUPAY_QR]
+,Deleted.[AT_TED_AMEX_QR]
+,Deleted.[AT_TED_CUR_CODE]
+,Deleted.[AT_TED_LOCATION]
+,Deleted.[AT_TED_ADDRESS]
+,Deleted.[AT_TED_STE_CODE]
+,Deleted.[AT_TED_STE_NAME]
+,Deleted.[AT_TED_CITY]
+,Deleted.[AT_TED_PIN_CODE]
+,Deleted.[AT_TED_MODEL]
+,Deleted.[AT_TED_DEVICE_OWNED]
+,Deleted.[AT_TED_DEVICE_PRICE]
+,Deleted.[AT_TED_INSTALLATION_FEE]
+,Deleted.[AT_TED_RENTAL_TYPE]
+,Deleted.[AT_TED_RENTAL_MODE]
+,Deleted.[AT_TED_RENTAL_PLAN]
+,Deleted.[AT_TED_RENTAL_AMOUNT]
+,Deleted.[AT_TED_RENTAL_FREQUENCY]
+,Deleted.[AT_TED_ADVANCE_RENT_AMOUNT]
+,Deleted.[AT_TED_ADVANCE_PAID_MONTH]
+,Deleted.[AT_TED_GRACE_PERIOD]
+,Deleted.[AT_TED_RENTAL_START_DATE]
+,Deleted.[AT_TED_NEXT_RENTAL_DATE]
+,Deleted.[AT_TED_RENTAL_THRESHOLD]
+,Deleted.[AT_TED_CURRENT_VOLUME]
+,Deleted.[AT_TED_MONTHLY_SERVICE_FEE]
+,Deleted.[AT_TED_NEXT_FEE_DATE]
+,Deleted.[AT_TED_MAX_DAILY_USAGE_LIMIT]
+,Deleted.[AT_TED_MAX_WEEKLY_USAGE_LIMIT]
+,Deleted.[AT_TED_MAX_MONTHLY_USAGE_LIMIT]
+,Deleted.[AT_TED_VELOCITY_CHECK_MINUTES]
+,Deleted.[AT_TED_VELOCITY_CHECK_COUNT]
+,Deleted.[AT_TED_DEVICE_SERIAL_NUMBER]
+,Deleted.[AT_TED_INSTALLATION_DATE]
+,Deleted.[AT_TED_DEINSTALL_DATE]
+,Deleted.[AT_TED_NOF_TERMINALS]
+,Deleted.[AT_TED_FRM_UPDATE_FLAG]
+,Deleted.[AT_TED_SWITCH_UPDATE_FLAG]
+,Deleted.[AT_TED_REMARKS]
+,Deleted.[AT_TED_SIM_NUMBER]
+,Deleted.[AT_TED_TYPE]
+,Deleted.[AT_TED_ACTIVATION_DATE]
+,Deleted.[AT_TED_ACTIVATED_BY]
+,Deleted.[AT_TED_DEACTIVATE_DATE]
+,Deleted.[AT_TED_DEACTIVATED_BY]
+,Deleted.[AT_TED_UPI_TERMINAL_TYPE]
+,Deleted.[AT_TED_UPI_OFFLINE_TYPE]
+,Deleted.[AT_TED_UPI_VPA]
+,Deleted.[AT_TED_UPI_BANK_ID]
+,Deleted.[AT_TED_IMEI_NUMBER]
+,Deleted.[AT_TED_TERMINAL_NAME]    
+INTO ' + @DestinationTableName + N'(
+[AT_TED_SER_NUMBER]
+      ,[AT_TED_CHANGE_TYPE]
+      ,[AT_TED_SERIAL_NUMBER]
+      ,[AT_TED_UPDATED_USER]
+      ,[AT_TED_LAST_UPDATED]
+      ,[AT_TED_INS_CODE]
+      ,[AT_TED_GEN_STATUS]
+      ,[AT_TED_AGR_SER_NUMBER]
+      ,[AT_TED_STATUS]
+      ,[AT_TED_STATUS_DATE]
+      ,[AT_TED_CREATED_USER]
+      ,[AT_TED_CREATED_DATE]
+      ,[AT_TED_VERIFIED_USER]
+      ,[AT_TED_VERIFIED_DATE]
+      ,[AT_TED_APPROVED_USER]
+      ,[AT_TED_APPROVED_DATE]
+      ,[AT_TED_MAP_SER_NUMBER]
+      ,[AT_TED_MERCHANT_ID]
+      ,[AT_TED_TERMINAL_ID]
+      ,[AT_TED_MVISA_QR]
+      ,[AT_TED_MPASS_QR]
+      ,[AT_TED_RUPAY_QR]
+      ,[AT_TED_AMEX_QR]
+      ,[AT_TED_CUR_CODE]
+      ,[AT_TED_LOCATION]
+      ,[AT_TED_ADDRESS]
+      ,[AT_TED_STE_CODE]
+      ,[AT_TED_STE_NAME]
+      ,[AT_TED_CITY]
+      ,[AT_TED_PIN_CODE]
+      ,[AT_TED_MODEL]
+      ,[AT_TED_DEVICE_OWNED]
+      ,[AT_TED_DEVICE_PRICE]
+      ,[AT_TED_INSTALLATION_FEE]
+      ,[AT_TED_RENTAL_TYPE]
+      ,[AT_TED_RENTAL_MODE]
+      ,[AT_TED_RENTAL_PLAN]
+      ,[AT_TED_RENTAL_AMOUNT]
+      ,[AT_TED_RENTAL_FREQUENCY]
+      ,[AT_TED_ADVANCE_RENT_AMOUNT]
+      ,[AT_TED_ADVANCE_PAID_MONTH]
+      ,[AT_TED_GRACE_PERIOD]
+      ,[AT_TED_RENTAL_START_DATE]
+      ,[AT_TED_NEXT_RENTAL_DATE]
+      ,[AT_TED_RENTAL_THRESHOLD]
+      ,[AT_TED_CURRENT_VOLUME]
+      ,[AT_TED_MONTHLY_SERVICE_FEE]
+      ,[AT_TED_NEXT_FEE_DATE]
+      ,[AT_TED_MAX_DAILY_USAGE_LIMIT]
+      ,[AT_TED_MAX_WEEKLY_USAGE_LIMIT]
+      ,[AT_TED_MAX_MONTHLY_USAGE_LIMIT]
+      ,[AT_TED_VELOCITY_CHECK_MINUTES]
+      ,[AT_TED_VELOCITY_CHECK_COUNT]
+      ,[AT_TED_DEVICE_SERIAL_NUMBER]
+      ,[AT_TED_INSTALLATION_DATE]
+      ,[AT_TED_DEINSTALL_DATE]
+      ,[AT_TED_NOF_TERMINALS]
+      ,[AT_TED_FRM_UPDATE_FLAG]
+      ,[AT_TED_SWITCH_UPDATE_FLAG]
+      ,[AT_TED_REMARKS]
+      ,[AT_TED_SIM_NUMBER]
+      ,[AT_TED_TYPE]
+      ,[AT_TED_ACTIVATION_DATE]
+      ,[AT_TED_ACTIVATED_BY]
+      ,[AT_TED_DEACTIVATE_DATE]
+      ,[AT_TED_DEACTIVATED_BY]
+      ,[AT_TED_UPI_TERMINAL_TYPE]
+      ,[AT_TED_UPI_OFFLINE_TYPE]
+      ,[AT_TED_UPI_VPA]
+      ,[AT_TED_UPI_BANK_ID]
+      ,[AT_TED_IMEI_NUMBER]
+      ,[AT_TED_TERMINAL_NAME]
+ 
+    );
+
+	SET @RowCount = @@ROWCOUNT;';
+	--SET IDENTITY_INSERT ' + @DestinationTableName + N' OFF;
+	--PRINT @sSQL;
+	EXEC sys.sp_executesql @sSQL, N'@RowCount INT OUTPUT', @RowCount = @rCount OUTPUT;
+	-- Get number of rows moved in this batch
+	PRINT 'Batch Rows Moved: ' + CAST(ISNULL(@rCount, 0) AS VARCHAR(30));
+
+	COMMIT;  -- Commit fast to release locks
+
+    --===============================
+    -- 4. Logging
+    --===============================
+    IF @rCount > 0
+    BEGIN
+        SET @TotalrCount = @TotalrCount + @rCount;
+
+        -- Log batch archival
+        INSERT INTO tbl_Retention_Logs_Auto (SourceTableName, DestinationTableName, TotalDataTransfered, Comment, EntryDate)
+        VALUES (@SourceTableName, @DestinationTableName, @rCount, 'Successfully - Archived', GETDATE());
+
+        -- Update the master table row for this execution (after commit to avoid blocking SELECT)
+        UPDATE TBL_RETENTION_MASTER_Auto
+        SET LastUpdated = GETDATE(), [Rows] = ISNULL(@TotalrCount, 0)
+        WHERE IID_NEW = @ID;
+    END
+    ELSE
+    BEGIN
+        -- Log no records found
+        INSERT INTO tbl_Retention_Logs_Auto (SourceTableName, DestinationTableName, TotalDataTransfered, Comment, EntryDate)
+        VALUES (@SourceTableName, @DestinationTableName, 0, 'No Records Found or Already Archived', GETDATE());
+    END
+
+    --===============================
+    -- 5. Adjust Batch Size Dynamically
+    --===============================
+    SET @endtime = GETDATE();
+    PRINT 'Execution Time: ' + CAST(DATEDIFF(SECOND, @starttime, @endtime) AS VARCHAR(3)) + ' Sec';
+
+    IF DATEDIFF(SECOND, @starttime, @endtime) < 30
+    BEGIN
+        IF (@BatchSize < @MaxBatchSize)
+            SET @BatchSize = @BatchSize + 1000;
+    END
+    ELSE IF (DATEDIFF(SECOND, @starttime, @endtime) > 30)
+    BEGIN
+        SET @BatchSize = @BatchSize - 1000;
+        IF (@BatchSize < 1000)
+            SET @BatchSize = 1000;
+    END
+
+    -- Wait to avoid overwhelming live transactions
+    WAITFOR DELAY '00:00:00.100';
+
+    -- Continue if rows still exist
+    IF @rCount > 0 GOTO UPDATE_BATCH;
+
+    --===============================
+    -- 6. Final Update for This Execution
+    --===============================
+    UPDATE TBL_RETENTION_MASTER_Auto
+    SET LastUpdated = GETDATE(),
+        [Rows] = ISNULL(@TotalrCount, 0)
+    WHERE IID_NEW = @ID;
+
+    PRINT 'Archival Completed Successfully. Total Rows Archived: ' + CAST(@TotalrCount AS VARCHAR(30));
+END;
