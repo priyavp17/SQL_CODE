@@ -1,0 +1,297 @@
+USE [DBADB]
+GO
+/****** Object:  StoredProcedure [dbo].[IRF_REPORT_PURGING] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE   PROCEDURE [dbo].[IRF_REPORT_PURGING]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    --===============================
+    -- 1. Declare Variables
+    --===============================
+    DECLARE @sSQL NVARCHAR(MAX);
+    DECLARE @SourceTableName SYSNAME = '[MARSPROD].[dbo].[IRF_REPORT]';
+    DECLARE @DestinationTableName SYSNAME = '[ARCHIVED].[dbo].[IRF_REPORT_ARCHIVED]';
+    
+	DECLARE @filter NVARCHAR(MAX) ='IRF_LAST_UPDATED < ''2026-04-01'''; 
+	DECLARE @column NVARCHAR(MAX) ='IRF_SER_NUMBER';
+	
+    DECLARE @ExecutionId UNIQUEIDENTIFIER = NEWID(); -- Unique run ID
+    DECLARE @filter_log NVARCHAR(MAX) = @filter + ' | RunId=' + CAST(@ExecutionId AS NVARCHAR(36));
+
+    DECLARE @ID INT;                     -- New IID_NEW for this run
+    DECLARE @rCount BIGINT;              
+    DECLARE @TotalrCount BIGINT = 0;
+    DECLARE @BatchSize INT = 100000;
+    DECLARE @MaxBatchSize INT = 1000000;
+    DECLARE @starttime DATETIME;
+    DECLARE @endtime DATETIME;
+
+    --===============================
+    -- 2. Insert New Master Row
+    --===============================
+    INSERT INTO TBL_RETENTION_MASTER_Auto (SourceTableName, DestinationTableName, Filter, LastUpdated)
+    VALUES (@SourceTableName, @DestinationTableName, @filter_log, GETDATE());
+
+    -- Capture new row ID for this execution
+    SET @ID = SCOPE_IDENTITY();
+    PRINT 'Processing IID_NEW: ' + CAST(@ID AS VARCHAR);
+
+    --===============================
+    -- 3. Archival Loop
+    --===============================
+    UPDATE_BATCH:
+    SET @starttime = GETDATE();
+
+    BEGIN TRANSACTION;
+    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
+	DECLARE @RowCount INT;
+
+    -- Build dynamic SQL for batch archival using CTE with READPAST
+	SET @sSQL = 
+N';WITH CTE_ToDelete AS (
+    SELECT TOP (' + CAST(@BatchSize AS NVARCHAR(10)) + N') 
+	 [IRF_SER_NUMBER]
+      ,[IRF_LAST_UPDATED]
+      ,[IRF_UPDATED_USER]
+      ,[IRF_INS_CODE]
+      ,[IRF_PRJ_SER_NUMBER]
+      ,[IRF_PAYMENT_DATE]
+      ,[IRF_NETWORK_DESC]
+      ,[IRF_CARD_TYPE]
+      ,[IRF_PTR_SER_NUMBER]
+      ,[IRF_MERCHANT_ID]
+      ,[IRF_LEGAL_NAME]
+      ,[IRF_AGGREGATOR]
+      ,[IRF_TERMINAL_ID]
+      ,[IRF_LOCAL_DATE_TIME]
+      ,[IRF_TXN_TYPE_DESC]
+      ,[IRF_CARD_NUMBER]
+      ,[IRF_TXN_AMOUNT]
+      ,[IRF_RET_REF_NUMBER]
+      ,[IRF_ONUS_OFFUS_DESC]
+      ,[IRF_PTR_DOM_INTL]
+      ,[IRF_FIXED]
+      ,[IRF_PERCENTAGE]
+      ,[IRF_AMOUNT]
+      ,[IRF_INCENTIVE_FIXED]
+      ,[IRF_INCENTIVE_PERCENT]
+      ,[IRF_INCENTIVE_AMOUNT]
+      ,[IRF_SCHG_FIXED]
+      ,[IRF_SCHG_PERCENT]
+      ,[IRF_SCHG_AMOUNT]
+      ,[IRF_MDR_FIXED]
+      ,[IRF_MDR_PERCENT]
+      ,[IRF_MDR_AMOUNT]
+      ,[IRF_MDR_TAX]
+      ,[IRF_ME_INCENTIVE]
+      ,[IRF_TDS]
+      ,[IRF_MER_NET_AMOUNT]
+      ,[IRF_PROFIT_LOS]
+      ,[IRF_POS_ENTRY_MODE]
+      ,[IRF_DISTRIBUTOR_NAME]
+      ,[IRF_MCC_CODE]
+      ,[IRF_MCC_DESCRIPTION]
+      ,[IRF_CARD_CATEGORY]
+      ,[IRF_CARD_SUB_CATEGORY]
+      ,[IRF_STATE]
+      ,[IRF_MDR_SGST]
+      ,[IRF_MDR_CGST]
+      ,[IRF_MDR_IGST]
+      ,[IRF_TERMINAL_MODEL]
+      ,[IRF_PAYMENT_MODE]
+      ,[IRF_SMS_DMS_TYPE]
+      ,[IRF_APPR_CODE]
+      ,[IRF_ERP_CODE]
+      ,[IRF_CC_MIN_UTIL_FEE]
+      ,[IRF_INCHG_FEE]
+    FROM ' + @SourceTableName + N' WITH (READPAST, ROWLOCK)
+    WHERE ' + @filter + N'
+    ORDER BY ' + @column + N'
+)
+DELETE FROM CTE_ToDelete
+OUTPUT 
+	Deleted.[IRF_SER_NUMBER]
+,Deleted.[IRF_LAST_UPDATED]
+,Deleted.[IRF_UPDATED_USER]
+,Deleted.[IRF_INS_CODE]
+,Deleted.[IRF_PRJ_SER_NUMBER]
+,Deleted.[IRF_PAYMENT_DATE]
+,Deleted.[IRF_NETWORK_DESC]
+,Deleted.[IRF_CARD_TYPE]
+,Deleted.[IRF_PTR_SER_NUMBER]
+,Deleted.[IRF_MERCHANT_ID]
+,Deleted.[IRF_LEGAL_NAME]
+,Deleted.[IRF_AGGREGATOR]
+,Deleted.[IRF_TERMINAL_ID]
+,Deleted.[IRF_LOCAL_DATE_TIME]
+,Deleted.[IRF_TXN_TYPE_DESC]
+,Deleted.[IRF_CARD_NUMBER]
+,Deleted.[IRF_TXN_AMOUNT]
+,Deleted.[IRF_RET_REF_NUMBER]
+,Deleted.[IRF_ONUS_OFFUS_DESC]
+,Deleted.[IRF_PTR_DOM_INTL]
+,Deleted.[IRF_FIXED]
+,Deleted.[IRF_PERCENTAGE]
+,Deleted.[IRF_AMOUNT]
+,Deleted.[IRF_INCENTIVE_FIXED]
+,Deleted.[IRF_INCENTIVE_PERCENT]
+,Deleted.[IRF_INCENTIVE_AMOUNT]
+,Deleted.[IRF_SCHG_FIXED]
+,Deleted.[IRF_SCHG_PERCENT]
+,Deleted.[IRF_SCHG_AMOUNT]
+,Deleted.[IRF_MDR_FIXED]
+,Deleted.[IRF_MDR_PERCENT]
+,Deleted.[IRF_MDR_AMOUNT]
+,Deleted.[IRF_MDR_TAX]
+,Deleted.[IRF_ME_INCENTIVE]
+,Deleted.[IRF_TDS]
+,Deleted.[IRF_MER_NET_AMOUNT]
+,Deleted.[IRF_PROFIT_LOS]
+,Deleted.[IRF_POS_ENTRY_MODE]
+,Deleted.[IRF_DISTRIBUTOR_NAME]
+,Deleted.[IRF_MCC_CODE]
+,Deleted.[IRF_MCC_DESCRIPTION]
+,Deleted.[IRF_CARD_CATEGORY]
+,Deleted.[IRF_CARD_SUB_CATEGORY]
+,Deleted.[IRF_STATE]
+,Deleted.[IRF_MDR_SGST]
+,Deleted.[IRF_MDR_CGST]
+,Deleted.[IRF_MDR_IGST]
+,Deleted.[IRF_TERMINAL_MODEL]
+,Deleted.[IRF_PAYMENT_MODE]
+,Deleted.[IRF_SMS_DMS_TYPE]
+,Deleted.[IRF_APPR_CODE]
+,Deleted.[IRF_ERP_CODE]
+,Deleted.[IRF_CC_MIN_UTIL_FEE]
+,Deleted.[IRF_INCHG_FEE]
+INTO ' + @DestinationTableName + N'(
+[IRF_SER_NUMBER]
+      ,[IRF_LAST_UPDATED]
+      ,[IRF_UPDATED_USER]
+      ,[IRF_INS_CODE]
+      ,[IRF_PRJ_SER_NUMBER]
+      ,[IRF_PAYMENT_DATE]
+      ,[IRF_NETWORK_DESC]
+      ,[IRF_CARD_TYPE]
+      ,[IRF_PTR_SER_NUMBER]
+      ,[IRF_MERCHANT_ID]
+      ,[IRF_LEGAL_NAME]
+      ,[IRF_AGGREGATOR]
+      ,[IRF_TERMINAL_ID]
+      ,[IRF_LOCAL_DATE_TIME]
+      ,[IRF_TXN_TYPE_DESC]
+      ,[IRF_CARD_NUMBER]
+      ,[IRF_TXN_AMOUNT]
+      ,[IRF_RET_REF_NUMBER]
+      ,[IRF_ONUS_OFFUS_DESC]
+      ,[IRF_PTR_DOM_INTL]
+      ,[IRF_FIXED]
+      ,[IRF_PERCENTAGE]
+      ,[IRF_AMOUNT]
+      ,[IRF_INCENTIVE_FIXED]
+      ,[IRF_INCENTIVE_PERCENT]
+      ,[IRF_INCENTIVE_AMOUNT]
+      ,[IRF_SCHG_FIXED]
+      ,[IRF_SCHG_PERCENT]
+      ,[IRF_SCHG_AMOUNT]
+      ,[IRF_MDR_FIXED]
+      ,[IRF_MDR_PERCENT]
+      ,[IRF_MDR_AMOUNT]
+      ,[IRF_MDR_TAX]
+      ,[IRF_ME_INCENTIVE]
+      ,[IRF_TDS]
+      ,[IRF_MER_NET_AMOUNT]
+      ,[IRF_PROFIT_LOS]
+      ,[IRF_POS_ENTRY_MODE]
+      ,[IRF_DISTRIBUTOR_NAME]
+      ,[IRF_MCC_CODE]
+      ,[IRF_MCC_DESCRIPTION]
+      ,[IRF_CARD_CATEGORY]
+      ,[IRF_CARD_SUB_CATEGORY]
+      ,[IRF_STATE]
+      ,[IRF_MDR_SGST]
+      ,[IRF_MDR_CGST]
+      ,[IRF_MDR_IGST]
+      ,[IRF_TERMINAL_MODEL]
+      ,[IRF_PAYMENT_MODE]
+      ,[IRF_SMS_DMS_TYPE]
+      ,[IRF_APPR_CODE]
+      ,[IRF_ERP_CODE]
+      ,[IRF_CC_MIN_UTIL_FEE]
+      ,[IRF_INCHG_FEE]
+    );
+
+	SET @RowCount = @@ROWCOUNT;';
+	PRINT @sSQL;
+	EXEC sys.sp_executesql @sSQL, N'@RowCount INT OUTPUT', @RowCount = @rCount OUTPUT;
+	-- Get number of rows moved in this batch
+	PRINT 'Batch Rows Moved: ' + CAST(ISNULL(@rCount, 0) AS VARCHAR(30));
+
+	COMMIT;  -- Commit fast to release locks
+
+    --===============================
+    -- 4. Logging
+    --===============================
+    IF @rCount > 0
+    BEGIN
+        SET @TotalrCount = @TotalrCount + @rCount;
+
+        -- Log batch archival
+        INSERT INTO tbl_Retention_Logs_Auto (SourceTableName, DestinationTableName, TotalDataTransfered, Comment, EntryDate)
+        VALUES (@SourceTableName, @DestinationTableName, @rCount, 'Successfully - Archived', GETDATE());
+
+        -- Update the master table row for this execution (after commit to avoid blocking SELECT)
+        UPDATE TBL_RETENTION_MASTER_Auto
+        SET LastUpdated = GETDATE(), [Rows] = ISNULL(@TotalrCount, 0)
+        WHERE IID_NEW = @ID;
+    END
+    ELSE
+    BEGIN
+        -- Log no records found
+        INSERT INTO tbl_Retention_Logs_Auto (SourceTableName, DestinationTableName, TotalDataTransfered, Comment, EntryDate)
+        VALUES (@SourceTableName, @DestinationTableName, 0, 'No Records Found or Already Archived', GETDATE());
+    END
+
+    --===============================
+    -- 5. Adjust Batch Size Dynamically
+    --===============================
+    SET @endtime = GETDATE();
+    PRINT 'Execution Time: ' + CAST(DATEDIFF(SECOND, @starttime, @endtime) AS VARCHAR(3)) + ' Sec';
+
+    IF DATEDIFF(SECOND, @starttime, @endtime) < 30
+    BEGIN
+        IF (@BatchSize < @MaxBatchSize)
+            SET @BatchSize = @BatchSize + 1000;
+    END
+    ELSE IF (DATEDIFF(SECOND, @starttime, @endtime) > 30)
+    BEGIN
+        SET @BatchSize = @BatchSize - 1000;
+        IF (@BatchSize < 1000)
+            SET @BatchSize = 1000;
+    END
+
+    -- Wait to avoid overwhelming live transactions
+    WAITFOR DELAY '00:00:01';
+
+    -- Continue if rows still exist
+    IF @rCount > 0 GOTO UPDATE_BATCH;
+
+    --===============================
+    -- 6. Final Update for This Execution
+    --===============================
+    UPDATE TBL_RETENTION_MASTER_Auto
+    SET LastUpdated = GETDATE(),
+        [Rows] = ISNULL(@TotalrCount, 0)
+    WHERE IID_NEW = @ID;
+
+    PRINT 'Archival Completed Successfully. Total Rows Archived: ' + CAST(@TotalrCount AS VARCHAR(30));
+END;
+GO
