@@ -1,0 +1,65 @@
+USE [MARSPROD]
+GO
+
+/****** Object:  Table [dbo].[IRF_REPORT]    Script Date: 9/17/2026 11:27:42 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[IRF_REPORT](
+	[IRF_SER_NUMBER] [bigint] IDENTITY(1,1) NOT NULL,
+	[IRF_LAST_UPDATED] [datetime] NOT NULL,
+	[IRF_UPDATED_USER] [int] NOT NULL,
+	[IRF_INS_CODE] [int] NOT NULL,
+	[IRF_PRJ_SER_NUMBER] [bigint] NULL,
+	[IRF_PAYMENT_DATE] [date] NULL,
+	[IRF_NETWORK_DESC] [varchar](15) NULL,
+	[IRF_CARD_TYPE] [varchar](10) NULL,
+	[IRF_PTR_SER_NUMBER] [bigint] NULL,
+	[IRF_MERCHANT_ID] [varchar](15) NULL,
+	[IRF_LEGAL_NAME] [varchar](60) NULL,
+	[IRF_AGGREGATOR] [varchar](60) NULL,
+	[IRF_TERMINAL_ID] [varchar](8) NULL,
+	[IRF_LOCAL_DATE_TIME] [datetime] NULL,
+	[IRF_TXN_TYPE_DESC] [varchar](30) NULL,
+	[IRF_CARD_NUMBER] [varchar](19) NULL,
+	[IRF_TXN_AMOUNT] [numeric](13, 3) NULL,
+	[IRF_RET_REF_NUMBER] [varchar](12) NULL,
+	[IRF_ONUS_OFFUS_DESC] [varchar](10) NULL,
+	[IRF_PTR_DOM_INTL] [varchar](15) NULL,
+	[IRF_FIXED] [numeric](8, 2) NULL,
+	[IRF_PERCENTAGE] [numeric](8, 2) NULL,
+	[IRF_AMOUNT] [numeric](9, 2) NULL,
+	[IRF_INCENTIVE_FIXED] [numeric](9, 2) NULL,
+	[IRF_INCENTIVE_PERCENT] [numeric](9, 2) NULL,
+	[IRF_INCENTIVE_AMOUNT] [numeric](9, 2) NULL,
+	[IRF_SCHG_FIXED] [numeric](9, 2) NULL,
+	[IRF_SCHG_PERCENT] [numeric](9, 2) NULL,
+	[IRF_SCHG_AMOUNT] [numeric](9, 2) NULL,
+	[IRF_MDR_FIXED] [numeric](9, 2) NULL,
+	[IRF_MDR_PERCENT] [numeric](9, 2) NULL,
+	[IRF_MDR_AMOUNT] [numeric](9, 2) NULL,
+	[IRF_MDR_TAX] [numeric](9, 2) NULL,
+	[IRF_ME_INCENTIVE] [numeric](9, 2) NULL,
+	[IRF_TDS] [numeric](9, 2) NULL,
+	[IRF_MER_NET_AMOUNT] [numeric](13, 2) NULL,
+	[IRF_PROFIT_LOS] [numeric](9, 2) NULL,
+	[IRF_POS_ENTRY_MODE] [varchar](15) NULL,
+	[IRF_DISTRIBUTOR_NAME] [varchar](60) NULL,
+	[IRF_MCC_CODE] [varchar](4) NULL,
+	[IRF_MCC_DESCRIPTION] [varchar](150) NULL,
+	[IRF_CARD_CATEGORY] [varchar](60) NULL,
+	[IRF_CARD_SUB_CATEGORY] [varchar](60) NULL,
+	[IRF_STATE] [varchar](60) NULL,
+	[IRF_MDR_SGST] [numeric](8, 2) NULL,
+	[IRF_MDR_CGST] [numeric](8, 2) NULL,
+	[IRF_MDR_IGST] [numeric](8, 2) NULL,
+	[IRF_TERMINAL_MODEL] [varchar](60) NULL,
+	[IRF_PAYMENT_MODE] [varchar](15) NULL,
+	[IRF_SMS_DMS_TYPE] [varchar](10) NULL,
+	[IRF_APPR_CODE] [varchar](6) NULL,
+	[IRF_ERP_CODE] [varchar](20) NULL,
+	[IRF_CC_MIN_UTIL_FEE] [numeric](13, 3) NULL,
+	[IRF_INCHG_FEE] [numeric](10, 3) NULL)
