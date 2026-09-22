@@ -19,3 +19,14 @@ ORDER BY
     (ISNULL(us.user_seeks, 0)
      + ISNULL(us.user_scans, 0)
      + ISNULL(us.user_lookups, 0)) DESC;
+SELECT
+    qsq.query_id,
+    qsp.plan_id,
+    qsp.is_forced_plan,
+    qsp.last_compile_start_time,
+    qsp.last_execution_time,
+    qsp.query_plan
+FROM sys.query_store_query qsq
+JOIN sys.query_store_plan qsp
+    ON qsq.query_id = qsp.query_id
+WHERE qsq.query_id = 246261;
