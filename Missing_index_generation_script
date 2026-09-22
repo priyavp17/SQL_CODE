@@ -85,3 +85,24 @@ SELECT
              AND query_plan_xml.exist('//MissingIndexes') = 1 
         THEN 1 ELSE 0 END) AS plans_with_missing_index_node
 FROM TodayQueries;
+
+
+
+
+
+-- Find your highest logical-IO queries today regardless of missing-index flag,
+-- so you can manually sanity-check whether they're doing scans vs seeks
+SELECT TOP 20
+    qsqt.query_sql_text,
+    qsrs.avg_logical_io_reads,
+    qsrs.avg_duration,
+    qsrs.count_executions,
+    qsp.query_plan
+FROM sys.query_store_query qsq
+JOIN sys.query_store_query_text qsqt ON qsq.query_text_id = qsqt.query_text_id
+JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+JOIN sys.query_store_runtime_stats_interval qsrsi 
+    ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+ORDER BY qsrs.avg_logical_io_reads DESC;
