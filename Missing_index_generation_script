@@ -141,3 +141,74 @@ CROSS APPLY tq.query_plan_xml.nodes('//RelOp') AS t(op)
 WHERE tq.query_plan_xml IS NOT NULL
     AND op.value('@PhysicalOp', 'NVARCHAR(100)') IN ('Table Scan', 'Index Scan', 'Clustered Index Scan')
 ORDER BY tq.avg_logical_io_reads DESC;
+
+
+WITH XMLNAMESPACES (DEFAULT 'http://schemas.microsoft.com/sqlserver/2004/07/showplan')
+SELECT 
+    tq.query_id,
+    tq.query_sql_text,
+    tq.avg_logical_io_reads,
+    tq.avg_duration,
+    tq.count_executions,
+    op.value('@PhysicalOp', 'NVARCHAR(100)') AS physical_op,
+    op.value('@LogicalOp', 'NVARCHAR(100)') AS logical_op,
+    op.value('@EstimateRows', 'FLOAT') AS estimated_rows,
+    obj.value('@Table', 'NVARCHAR(300)') AS table_name,
+    obj.value('@Index', 'NVARCHAR(300)') AS index_name
+FROM (
+    SELECT TOP 20
+        qsq.query_id,
+        qsqt.query_sql_text,
+        TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml,
+        qsrs.avg_logical_io_reads,
+        qsrs.avg_duration,
+        qsrs.count_executions
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_query_text qsqt ON qsq.query_text_id = qsqt.query_text_id
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+    ORDER BY qsrs.avg_logical_io_reads DESC
+) tq
+CROSS APPLY tq.query_plan_xml.nodes('//RelOp') AS t(op)
+CROSS APPLY op.nodes('.//Object') AS o(obj)
+WHERE tq.query_plan_xml IS NOT NULL
+    AND op.value('@PhysicalOp', 'NVARCHAR(100)') IN ('Table Scan', 'Index Scan', 'Clustered Index Scan')
+ORDER BY tq.avg_logical_io_reads DESC;
+
+
+
+WITH XMLNAMESPACES (DEFAULT 'http://schemas.microsoft.com/sqlserver/2004/07/showplan')
+SELECT 
+    tq.query_id,
+    tq.query_sql_text,
+    tq.avg_duration,
+    tq.avg_logical_io_reads,
+    tq.count_executions,
+    mig.value('(@Impact)[1]', 'FLOAT') AS estimated_impact,
+    mi.value('(@Table)[1]', 'NVARCHAR(300)') AS missing_index_table,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="EQUALITY"]/Column') AS eq(c) FOR XML PATH('')), 1, 1, '') AS equality_columns,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INEQUALITY"]/Column') AS ineq(c) FOR XML PATH('')), 1, 1, '') AS inequality_columns,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INCLUDE"]/Column') AS inc(c) FOR XML PATH('')), 1, 1, '') AS include_columns
+FROM (
+    SELECT 
+        qsq.query_id,
+        qsqt.query_sql_text,
+        TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml,
+        qsrs.avg_duration,
+        qsrs.avg_logical_io_reads,
+        qsrs.count_executions
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_query_text qsqt ON qsq.query_text_id = qsqt.query_text_id
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+) tq
+CROSS APPLY tq.query_plan_xml.nodes('//MissingIndexes/MissingIndexGroup') AS t1(mig)
+CROSS APPLY mig.nodes('MissingIndex') AS t2(mi)
+WHERE tq.query_plan_xml IS NOT NULL
+ORDER BY estimated_impact DESC;
