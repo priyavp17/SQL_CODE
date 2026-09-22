@@ -1,3 +1,80 @@
+Step 1: Rank by real-world impact, not just count
+
+Impact alone is misleading — a query that ran once with 95% impact matters less than one that ran 10,000 times with 60% impact. Sort by weighted impact:
+
+WITH XMLNAMESPACES (DEFAULT 'http://schemas.microsoft.com/sqlserver/2004/07/showplan')
+SELECT 
+    tq.query_id,
+    tq.count_executions,
+    tq.avg_logical_io_reads,
+    mig.value('(@Impact)[1]', 'FLOAT') AS estimated_impact,
+    mi.value('(@Table)[1]', 'NVARCHAR(300)') AS missing_index_table,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="EQUALITY"]/Column') AS eq(c) FOR XML PATH('')), 1, 1, '') AS equality_columns,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INEQUALITY"]/Column') AS ineq(c) FOR XML PATH('')), 1, 1, '') AS inequality_columns,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INCLUDE"]/Column') AS inc(c) FOR XML PATH('')), 1, 1, '') AS include_columns,
+    -- weighted score: impact matters more when the query runs a lot
+    (mig.value('(@Impact)[1]', 'FLOAT') * tq.count_executions) AS weighted_priority
+FROM (
+    SELECT 
+        qsq.query_id,
+        TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml,
+        qsrs.avg_logical_io_reads,
+        qsrs.count_executions
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+) tq
+CROSS APPLY tq.query_plan_xml.nodes('//MissingIndexes/MissingIndexGroup') AS t1(mig)
+CROSS APPLY mig.nodes('MissingIndex') AS t2(mi)
+WHERE tq.query_plan_xml IS NOT NULL
+ORDER BY weighted_priority DESC;
+
+Step 2: Group by table + column signature to find duplicates
+
+WITH XMLNAMESPACES (DEFAULT 'http://schemas.microsoft.com/sqlserver/2004/07/showplan'),
+MissingIdx AS (
+    SELECT 
+        tq.query_id,
+        tq.count_executions,
+        mig.value('(@Impact)[1]', 'FLOAT') AS estimated_impact,
+        mi.value('(@Table)[1]', 'NVARCHAR(300)') AS missing_index_table,
+        STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="EQUALITY"]/Column') AS eq(c) FOR XML PATH('')), 1, 1, '') AS equality_columns,
+        STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INEQUALITY"]/Column') AS ineq(c) FOR XML PATH('')), 1, 1, '') AS inequality_columns,
+        STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INCLUDE"]/Column') AS inc(c) FOR XML PATH('')), 1, 1, '') AS include_columns
+    FROM (
+        SELECT 
+            qsq.query_id,
+            TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml,
+            qsrs.count_executions
+        FROM sys.query_store_query qsq
+        JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+        JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+        JOIN sys.query_store_runtime_stats_interval qsrsi 
+            ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+        WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+    ) tq
+    CROSS APPLY tq.query_plan_xml.nodes('//MissingIndexes/MissingIndexGroup') AS t1(mig)
+    CROSS APPLY mig.nodes('MissingIndex') AS t2(mi)
+    WHERE tq.query_plan_xml IS NOT NULL
+)
+SELECT 
+    missing_index_table,
+    equality_columns,
+    inequality_columns,
+    include_columns,
+    COUNT(DISTINCT query_id) AS distinct_queries_suggesting_this,
+    SUM(count_executions) AS total_executions_affected,
+    MAX(estimated_impact) AS max_impact,
+    AVG(estimated_impact) AS avg_impact
+FROM MissingIdx
+GROUP BY missing_index_table, equality_columns, inequality_columns, include_columns
+ORDER BY total_executions_affected DESC, max_impact DESC;
+
+
+
 SELECT 
     qsp.plan_id,
     qsq.query_id,
