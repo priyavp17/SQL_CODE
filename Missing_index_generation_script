@@ -106,3 +106,38 @@ JOIN sys.query_store_runtime_stats_interval qsrsi
     ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
 WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
 ORDER BY qsrs.avg_logical_io_reads DESC;
+
+
+
+;WITH TopQueries AS (
+    SELECT TOP 20
+        qsq.query_id,
+        qsqt.query_sql_text,
+        TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml,
+        qsrs.avg_logical_io_reads,
+        qsrs.avg_duration,
+        qsrs.count_executions
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_query_text qsqt ON qsq.query_text_id = qsqt.query_text_id
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+    ORDER BY qsrs.avg_logical_io_reads DESC
+)
+SELECT 
+    tq.query_id,
+    tq.query_sql_text,
+    tq.avg_logical_io_reads,
+    tq.avg_duration,
+    tq.count_executions,
+    op.value('@PhysicalOp', 'NVARCHAR(100)') AS physical_op,
+    op.value('@LogicalOp', 'NVARCHAR(100)') AS logical_op,
+    op.value('@EstimateRows', 'FLOAT') AS estimated_rows,
+    op.value('(RelOp/IndexScan/Object/@Table)[1]', 'NVARCHAR(300)') AS table_name
+FROM TopQueries tq
+CROSS APPLY tq.query_plan_xml.nodes('//RelOp') AS t(op)
+WHERE tq.query_plan_xml IS NOT NULL
+    AND op.value('@PhysicalOp', 'NVARCHAR(100)') IN ('Table Scan', 'Index Scan', 'Clustered Index Scan')
+ORDER BY tq.avg_logical_io_reads DESC;
