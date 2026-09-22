@@ -1,0 +1,49 @@
+;WITH TodayQueries AS (
+    SELECT 
+        qsq.query_id,
+        qsqt.query_sql_text,
+        qsp.plan_id,
+        qsp.query_plan,
+        qsrs.avg_duration,
+        qsrs.avg_cpu_time,
+        qsrs.avg_logical_io_reads,
+        qsrs.count_executions
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_query_text qsqt 
+        ON qsq.query_text_id = qsqt.query_text_id
+    JOIN sys.query_store_plan qsp 
+        ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs 
+        ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+)
+SELECT 
+    tq.query_id,
+    tq.query_sql_text,
+    tq.avg_duration,
+    tq.avg_logical_io_reads,
+    tq.count_executions,
+    mi.value('(MissingIndexes/MissingIndexGroup/@Impact)[1]', 'FLOAT') AS estimated_impact,
+    mi.value('(MissingIndexes/MissingIndexGroup/MissingIndex/@Table)[1]', 'NVARCHAR(300)') AS missing_index_table,
+    STUFF((
+        SELECT ',' + c.value('@Name', 'NVARCHAR(128)')
+        FROM mi.nodes('MissingIndexes/MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="EQUALITY"]/Column') AS eq(c)
+        FOR XML PATH('')
+    ), 1, 1, '') AS equality_columns,
+    STUFF((
+        SELECT ',' + c.value('@Name', 'NVARCHAR(128)')
+        FROM mi.nodes('MissingIndexes/MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="INEQUALITY"]/Column') AS ineq(c)
+        FOR XML PATH('')
+    ), 1, 1, '') AS inequality_columns,
+    STUFF((
+        SELECT ',' + c.value('@Name', 'NVARCHAR(128)')
+        FROM mi.nodes('MissingIndexes/MissingIndexGroup/MissingIndex/ColumnGroup[@Usage="INCLUDE"]/Column') AS inc(c)
+        FOR XML PATH('')
+    ), 1, 1, '') AS include_columns
+FROM TodayQueries tq
+CROSS APPLY tq.query_plan.nodes('//StmtSimple') AS stmt(s)
+OUTER APPLY stmt.s.nodes('.') AS n(mi)
+WHERE tq.query_plan.exist('//MissingIndexes') = 1
+ORDER BY estimated_impact DESC;
