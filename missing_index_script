@@ -1,0 +1,138 @@
+//1. Missing Index Details//
+SELECT
+    DB_NAME(mid.database_id) AS DatabaseName,
+    OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id) AS SchemaName,
+    OBJECT_NAME(mid.object_id, mid.database_id) AS TableName,
+    migs.user_seeks AS UserSeeks,
+    migs.user_scans AS UserScans,
+    CAST(migs.avg_total_user_cost AS DECIMAL(18,2)) AS AvgUserCost,
+    CAST(migs.avg_user_impact AS DECIMAL(10,2)) AS AvgUserImpact,
+    mid.equality_columns AS EqualityColumns,
+    mid.inequality_columns AS InequalityColumns,
+    mid.included_columns AS IncludedColumns
+FROM sys.dm_db_missing_index_groups AS mig
+INNER JOIN sys.dm_db_missing_index_group_stats AS migs
+    ON mig.index_group_handle = migs.group_handle
+INNER JOIN sys.dm_db_missing_index_details AS mid
+    ON mig.index_handle = mid.index_handle
+ORDER BY
+    migs.avg_user_impact DESC,
+    migs.user_seeks DESC;
+//2. Recently Executed Queries — Last 24 Hours//
+SELECT
+    DB_NAME(st.dbid) AS DatabaseName,
+    qs.execution_count,
+    qs.last_execution_time,
+    qs.total_worker_time / 1000 AS TotalCPU_ms,
+    qs.total_elapsed_time / 1000 AS TotalElapsed_ms,
+    qs.total_logical_reads AS TotalLogicalReads,
+    qs.total_logical_writes AS TotalLogicalWrites,
+    SUBSTRING(
+        st.text,
+        (qs.statement_start_offset / 2) + 1,
+        (
+            (
+                CASE qs.statement_end_offset
+                    WHEN -1 THEN DATALENGTH(st.text)
+                    ELSE qs.statement_end_offset
+                END
+                - qs.statement_start_offset
+            ) / 2
+        ) + 1
+    ) AS ExecutedQuery
+FROM sys.dm_exec_query_stats AS qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
+WHERE qs.last_execution_time >= DATEADD(HOUR, -24, GETDATE())
+ORDER BY qs.last_execution_time DESC;
+//3. Recently Executed Queries — Today Only//
+SELECT
+    DB_NAME(st.dbid) AS DatabaseName,
+    qs.execution_count,
+    qs.last_execution_time,
+    qs.total_worker_time / 1000 AS TotalCPU_ms,
+    qs.total_elapsed_time / 1000 AS TotalElapsed_ms,
+    qs.total_logical_reads AS TotalLogicalReads,
+    qs.total_logical_writes AS TotalLogicalWrites,
+    SUBSTRING(
+        st.text,
+        (qs.statement_start_offset / 2) + 1,
+        (
+            (
+                CASE qs.statement_end_offset
+                    WHEN -1 THEN DATALENGTH(st.text)
+                    ELSE qs.statement_end_offset
+                END
+                - qs.statement_start_offset
+            ) / 2
+        ) + 1
+    ) AS ExecutedQuery
+FROM sys.dm_exec_query_stats AS qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
+WHERE qs.last_execution_time >=
+      CAST(GETDATE() AS DATE)
+ORDER BY qs.last_execution_time DESC;
+//4. Missing Index Details with Recommended CREATE INDEX Statement//
+SELECT
+    DB_NAME(mid.database_id) AS DatabaseName,
+    OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id) AS SchemaName,
+    OBJECT_NAME(mid.object_id, mid.database_id) AS TableName,
+    migs.user_seeks AS UserSeeks,
+    migs.user_scans AS UserScans,
+    CAST(migs.avg_user_impact AS DECIMAL(10,2)) AS AvgUserImpact,
+    mid.equality_columns,
+    mid.inequality_columns,
+    mid.included_columns,
+
+    'CREATE NONCLUSTERED INDEX [IX_Missing_' +
+    OBJECT_NAME(mid.object_id, mid.database_id) + '] ON ' +
+    QUOTENAME(OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id)) + '.' +
+    QUOTENAME(OBJECT_NAME(mid.object_id, mid.database_id)) +
+    ' (' +
+    ISNULL(mid.equality_columns, '') +
+    CASE
+        WHEN mid.equality_columns IS NOT NULL
+         AND mid.inequality_columns IS NOT NULL
+        THEN ', '
+        ELSE ''
+    END +
+    ISNULL(mid.inequality_columns, '') +
+    ')' +
+    CASE
+        WHEN mid.included_columns IS NOT NULL
+        THEN ' INCLUDE (' + mid.included_columns + ')'
+        ELSE ''
+    END + ';' AS RecommendedIndexQuery
+
+FROM sys.dm_db_missing_index_groups AS mig
+INNER JOIN sys.dm_db_missing_index_group_stats AS migs
+    ON mig.index_group_handle = migs.group_handle
+INNER JOIN sys.dm_db_missing_index_details AS mid
+    ON mig.index_handle = mid.index_handle
+ORDER BY
+    migs.avg_user_impact DESC,
+    migs.user_seeks DESC;
+//5. Recently Executed Queries — Top CPU//
+SELECT TOP 50
+    DB_NAME(st.dbid) AS DatabaseName,
+    qs.execution_count,
+    qs.last_execution_time,
+    qs.total_worker_time / 1000 AS TotalCPU_ms,
+    (qs.total_worker_time / NULLIF(qs.execution_count, 0)) / 1000 AS AvgCPU_ms,
+    qs.total_elapsed_time / 1000 AS TotalElapsed_ms,
+    (qs.total_elapsed_time / NULLIF(qs.execution_count, 0)) / 1000 AS AvgElapsed_ms,
+    SUBSTRING(
+        st.text,
+        (qs.statement_start_offset / 2) + 1,
+        (
+            (
+                CASE qs.statement_end_offset
+                    WHEN -1 THEN DATALENGTH(st.text)
+                    ELSE qs.statement_end_offset
+                END
+                - qs.statement_start_offset
+            ) / 2
+        ) + 1
+    ) AS ExecutedQuery
+FROM sys.dm_exec_query_stats AS qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
+ORDER BY qs.total_worker_time DESC;
