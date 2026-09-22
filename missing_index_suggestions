@@ -1,0 +1,87 @@
+WITH LongRunningWeekly AS (
+    SELECT 
+        qsq.query_id,
+        qsqt.query_sql_text,
+        qsrs.avg_duration,               -- microseconds
+        qsrs.avg_logical_io_reads,
+        qsrs.count_executions,
+        qsrs.last_execution_time,
+        CAST(qsrsi.start_time AS DATE) AS run_date
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_query_text qsqt ON qsq.query_text_id = qsqt.query_text_id
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= DATEADD(DAY, -7, CAST(GETDATE() AS DATE))
+      AND qsrs.avg_duration >= 300000000   -- 5 minutes in microseconds (5*60*1,000,000)
+)
+SELECT 
+    query_id,
+    MAX(query_sql_text) AS query_sql_text,
+    COUNT(DISTINCT run_date) AS distinct_days_ran,
+    MAX(avg_duration)/1000000.0 AS max_avg_duration_sec,
+    MAX(avg_logical_io_reads) AS max_avg_logical_io_reads,
+    SUM(count_executions) AS total_executions,
+    MAX(last_execution_time) AS last_execution_time
+FROM LongRunningWeekly
+GROUP BY query_id
+HAVING COUNT(DISTINCT run_date) >= 5    -- adjust threshold: "runs every day" over a 7-day window
+ORDER BY max_avg_duration_sec DESC;
+
+
+WITH XMLNAMESPACES (DEFAULT 'http://schemas.microsoft.com/sqlserver/2004/07/showplan'),
+LongRunningWeekly AS (
+    SELECT 
+        qsq.query_id,
+        qsqt.query_sql_text,
+        qsrs.avg_duration,
+        qsrs.avg_logical_io_reads,
+        qsrs.count_executions,
+        qsrs.last_execution_time,
+        TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml,
+        CAST(qsrsi.start_time AS DATE) AS run_date
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_query_text qsqt ON qsq.query_text_id = qsqt.query_text_id
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= DATEADD(DAY, -7, CAST(GETDATE() AS DATE))
+      AND qsrs.avg_duration >= 300000000
+),
+RecurringQueries AS (
+    SELECT 
+        query_id,
+        MAX(query_sql_text) AS query_sql_text,
+        COUNT(DISTINCT run_date) AS distinct_days_ran,
+        MAX(avg_duration)/1000000.0 AS max_avg_duration_sec,
+        MAX(avg_logical_io_reads) AS max_avg_logical_io_reads,
+        SUM(count_executions) AS total_executions,
+        MAX(last_execution_time) AS last_execution_time
+    FROM LongRunningWeekly
+    GROUP BY query_id
+    HAVING COUNT(DISTINCT run_date) >= 5
+)
+SELECT 
+    rq.query_id,
+    rq.query_sql_text,
+    rq.distinct_days_ran,
+    rq.max_avg_duration_sec,
+    rq.total_executions,
+    rq.last_execution_time,
+    mig.value('(@Impact)[1]', 'FLOAT') AS estimated_impact_pct,
+    mi.value('(@Table)[1]', 'NVARCHAR(300)') AS missing_index_table,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="EQUALITY"]/Column') AS eq(c) FOR XML PATH('')), 1, 1, '') AS equality_columns,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INEQUALITY"]/Column') AS ineq(c) FOR XML PATH('')), 1, 1, '') AS inequality_columns,
+    STUFF((SELECT ',' + c.value('@Name','NVARCHAR(128)') FROM mi.nodes('ColumnGroup[@Usage="INCLUDE"]/Column') AS inc(c) FOR XML PATH('')), 1, 1, '') AS include_columns
+FROM RecurringQueries rq
+JOIN LongRunningWeekly lrw ON rq.query_id = lrw.query_id   -- bring the plan XML back in
+CROSS APPLY lrw.query_plan_xml.nodes('//MissingIndexes/MissingIndexGroup') AS t1(mig)
+CROSS APPLY mig.nodes('MissingIndex') AS t2(mi)
+WHERE lrw.query_plan_xml IS NOT NULL
+GROUP BY rq.query_id, rq.query_sql_text, rq.distinct_days_ran, rq.max_avg_duration_sec, 
+         rq.total_executions, rq.last_execution_time,
+         mig.value('(@Impact)[1]', 'FLOAT'), mi.value('(@Table)[1]', 'NVARCHAR(300)'),
+         mi.query('.')
+ORDER BY estimated_impact_pct DESC;
