@@ -63,3 +63,25 @@ CROSS APPLY tq.query_plan_xml.nodes('//MissingIndexes/MissingIndexGroup') AS t1(
 CROSS APPLY mig.nodes('MissingIndex') AS t2(mi)
 WHERE tq.query_plan_xml IS NOT NULL
 ORDER BY estimated_impact DESC;
+
+--to check how many queries on today
+
+;WITH TodayQueries AS (
+    SELECT 
+        qsq.query_id,
+        qsp.plan_id,
+        TRY_CAST(qsp.query_plan AS XML) AS query_plan_xml
+    FROM sys.query_store_query qsq
+    JOIN sys.query_store_plan qsp ON qsq.query_id = qsp.query_id
+    JOIN sys.query_store_runtime_stats qsrs ON qsp.plan_id = qsrs.plan_id
+    JOIN sys.query_store_runtime_stats_interval qsrsi 
+        ON qsrs.runtime_stats_interval_id = qsrsi.runtime_stats_interval_id
+    WHERE qsrsi.start_time >= CAST(GETDATE() AS DATE)
+)
+SELECT 
+    COUNT(*) AS total_plans,
+    SUM(CASE WHEN query_plan_xml IS NOT NULL THEN 1 ELSE 0 END) AS successfully_parsed,
+    SUM(CASE WHEN query_plan_xml IS NOT NULL 
+             AND query_plan_xml.exist('//MissingIndexes') = 1 
+        THEN 1 ELSE 0 END) AS plans_with_missing_index_node
+FROM TodayQueries;
